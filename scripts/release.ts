@@ -38,9 +38,11 @@ async function main(): Promise<void> {
   await Promise.all(manifests.packageJson.map(file => updatePackageJson(file, version)));
   await Promise.all(manifests.cargoToml.map(file => updateCargoToml(file, version)));
 
+  const publishableTypeScriptPackages = await getPublishableTypeScriptPackages(manifests.packageJson);
+
   await createAndPushCommit(version);
 
-  await runCommand('pnpm', ['publish'], path.join(repoRoot, 'typescript'));
+  await publishTypeScriptPackages(publishableTypeScriptPackages, version);
   await runCommand('cargo', ['publish'], path.join(repoRoot, 'rust'));
 }
 
@@ -154,6 +156,92 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
 
   await fs.writeFile(filePath, content, 'utf8');
   console.log(`Updated ${relative(filePath)} to ${version}`);
+}
+
+type PublishablePackage = {
+  name: string;
+  directory: string;
+};
+
+async function getPublishableTypeScriptPackages(packageJsonPaths: string[]): Promise<PublishablePackage[]> {
+  const tsRoot = path.join(repoRoot, 'typescript');
+  const packages: PublishablePackage[] = [];
+
+  for (const filePath of packageJsonPaths) {
+    const isTypeScriptPackage =
+      filePath === path.join(tsRoot, 'package.json') ||
+      filePath.startsWith(`${tsRoot}${path.sep}`);
+
+    if (!isTypeScriptPackage) {
+      continue;
+    }
+
+    const raw = await fs.readFile(filePath, 'utf8');
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      throw new Error(`Failed to parse JSON in ${relative(filePath)}: ${(error as Error).message}`);
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error(`Unexpected JSON shape in ${relative(filePath)} (expected object)`);
+    }
+
+    const pkg = parsed as { name?: unknown; private?: unknown };
+
+    if (pkg.private === true) {
+      continue;
+    }
+
+    if (typeof pkg.name !== 'string' || pkg.name.length === 0) {
+      console.warn(`Skipping ${relative(filePath)} (missing package name)`);
+      continue;
+    }
+
+    packages.push({
+      name: pkg.name,
+      directory: path.dirname(filePath)
+    });
+  }
+
+  return packages;
+}
+
+async function publishTypeScriptPackages(packages: PublishablePackage[], version: string): Promise<void> {
+  if (packages.length === 0) {
+    console.warn('No publishable TypeScript packages found, skipping npm publish');
+    return;
+  }
+
+  const tag = version.includes('-rc.') ? 'rc' : 'latest';
+
+  for (const pkg of packages) {
+    console.log(`Preparing to publish ${pkg.name}@${version} from ${relative(pkg.directory)}`);
+
+    if (await packageVersionExists(pkg.name, version)) {
+      console.log(`Skipping ${pkg.name}@${version} (already published)`);
+      continue;
+    }
+
+    await runCommand(
+      'pnpm',
+      ['--filter', pkg.name, 'publish', '--access', 'public', '--tag', tag],
+      path.join(repoRoot, 'typescript')
+    );
+  }
+
+  console.log(`Published TypeScript packages with tag '${tag}'`);
+}
+
+async function packageVersionExists(name: string, version: string): Promise<boolean> {
+  try {
+    await captureCommand('npm', ['view', `${name}@${version}`, 'version'], repoRoot);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function runCommand(command: string, args: string[], cwd: string): Promise<void> {

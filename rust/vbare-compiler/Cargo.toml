@@ -1,5 +1,5 @@
 [package]
-name = "compiler"
+name = "vbare-compiler"
 version.workspace = true
 edition.workspace = true
 

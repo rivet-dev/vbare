@@ -1,5 +1,5 @@
 {
-  "name": "@vbare/vbare",
+  "name": "vbare",
   "version": "0.0.1",
   "description": "Versioned data handling for BARE schemas",
   "main": "./dist/index.js",

@@ -1,5 +1,8 @@
 on:
   pull_request:
+  push:
+    branches:
+      - main
 
 jobs:
   publish:
@@ -15,5 +18,5 @@ jobs:
         run: pnpm build
         working-directory: ./typescript
       - name: Publish preview packages
-        run: pnpm dlx pkg-pr-new publish 'compiler' 'vbare' --packageManager pnpm
+        run: pnpm dlx pkg-pr-new publish 'vbare-compiler' 'vbare' --packageManager pnpm
         working-directory: ./typescript

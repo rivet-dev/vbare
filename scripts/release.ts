@@ -39,11 +39,12 @@ async function main(): Promise<void> {
   await Promise.all(manifests.cargoToml.map(file => updateCargoToml(file, version)));
 
   const publishableTypeScriptPackages = await getPublishableTypeScriptPackages(manifests.packageJson);
+  const publishableRustPackages = await getPublishableRustPackages(manifests.cargoToml);
 
   await createAndPushCommit(version);
 
   await publishTypeScriptPackages(publishableTypeScriptPackages, version);
-  await runCommand('cargo', ['publish'], path.join(repoRoot, 'rust'));
+  await publishRustPackages(publishableRustPackages, version);
 }
 
 function isValidVersion(version: string): boolean {
@@ -158,14 +159,14 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
   console.log(`Updated ${relative(filePath)} to ${version}`);
 }
 
-type PublishablePackage = {
+type PublishableTypeScriptPackage = {
   name: string;
   directory: string;
 };
 
-async function getPublishableTypeScriptPackages(packageJsonPaths: string[]): Promise<PublishablePackage[]> {
+async function getPublishableTypeScriptPackages(packageJsonPaths: string[]): Promise<PublishableTypeScriptPackage[]> {
   const tsRoot = path.join(repoRoot, 'typescript');
-  const packages: PublishablePackage[] = [];
+  const packages: PublishableTypeScriptPackage[] = [];
 
   for (const filePath of packageJsonPaths) {
     const isTypeScriptPackage =
@@ -209,7 +210,7 @@ async function getPublishableTypeScriptPackages(packageJsonPaths: string[]): Pro
   return packages;
 }
 
-async function publishTypeScriptPackages(packages: PublishablePackage[], version: string): Promise<void> {
+async function publishTypeScriptPackages(packages: PublishableTypeScriptPackage[], version: string): Promise<void> {
   if (packages.length === 0) {
     console.warn('No publishable TypeScript packages found, skipping npm publish');
     return;
@@ -239,6 +240,166 @@ async function packageVersionExists(name: string, version: string): Promise<bool
   try {
     await captureCommand('npm', ['view', `${name}@${version}`, 'version'], repoRoot);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+type PublishableRustPackage = {
+  name: string;
+  directory: string;
+  localDependencies: string[];
+};
+
+async function getPublishableRustPackages(cargoTomlPaths: string[]): Promise<PublishableRustPackage[]> {
+  const rustRoot = path.join(repoRoot, 'rust');
+  const packages: PublishableRustPackage[] = [];
+
+  for (const filePath of cargoTomlPaths) {
+    const normalized = path.normalize(filePath);
+    const rustWorkspaceRoot = path.join(rustRoot, 'Cargo.toml');
+
+    if (normalized === rustWorkspaceRoot) {
+      continue;
+    }
+
+    const isRustCrate = normalized.startsWith(`${rustRoot}${path.sep}`);
+    if (!isRustCrate) {
+      continue;
+    }
+
+    const crateDirectory = path.dirname(normalized);
+    const relativeToRustRoot = path.relative(rustRoot, crateDirectory);
+    if (relativeToRustRoot.split(path.sep).includes('examples')) {
+      continue;
+    }
+
+    const raw = await fs.readFile(normalized, 'utf8');
+    const lines = raw.split(/\r?\n/);
+
+    let inPackageSection = false;
+    let packageName: string | undefined;
+    let publishFlag: string | undefined;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        inPackageSection = trimmed === '[package]';
+        continue;
+      }
+
+      if (!inPackageSection) {
+        continue;
+      }
+
+      if (!packageName) {
+        const nameMatch = trimmed.match(/^name\s*=\s*"([^"]+)"/);
+        if (nameMatch) {
+          packageName = nameMatch[1];
+          continue;
+        }
+      }
+
+      if (!publishFlag) {
+        const publishMatch = trimmed.match(/^publish\s*=\s*(.+)$/);
+        if (publishMatch) {
+          publishFlag = publishMatch[1].trim();
+        }
+      }
+    }
+
+    if (publishFlag && publishFlag.startsWith('false')) {
+      continue;
+    }
+
+    if (!packageName) {
+      console.warn(`Skipping ${relative(normalized)} (missing package name)`);
+      continue;
+    }
+
+    const localDependencies: string[] = [];
+    const dependencyRegex = /^([A-Za-z0-9_-]+)\s*=\s*{[^}]*path\s*=\s*"([^"]+)"[^}]*}$/gm;
+    let match: RegExpExecArray | null;
+    while ((match = dependencyRegex.exec(raw)) !== null) {
+      localDependencies.push(match[1]);
+    }
+
+    packages.push({
+      name: packageName,
+      directory: crateDirectory,
+      localDependencies
+    });
+  }
+
+  return packages;
+}
+
+async function publishRustPackages(packages: PublishableRustPackage[], version: string): Promise<void> {
+  if (packages.length === 0) {
+    console.warn('No publishable Rust crates found, skipping cargo publish');
+    return;
+  }
+
+  const ordered = orderRustPackages(packages);
+
+  for (const pkg of ordered) {
+    console.log(`Preparing to publish ${pkg.name}@${version} from ${relative(pkg.directory)}`);
+
+    if (await rustPackageVersionExists(pkg.name, version)) {
+      console.log(`Skipping ${pkg.name}@${version} (already published)`);
+      continue;
+    }
+
+    await runCommand('cargo', ['publish'], pkg.directory);
+  }
+
+  console.log('Published Rust crates');
+}
+
+function orderRustPackages(packages: PublishableRustPackage[]): PublishableRustPackage[] {
+  const ordered: PublishableRustPackage[] = [];
+  const packageMap = new Map(packages.map(pkg => [pkg.name, pkg]));
+  const visited = new Set<string>();
+  const visiting = new Set<string>();
+
+  const visit = (pkg: PublishableRustPackage): void => {
+    if (visited.has(pkg.name)) {
+      return;
+    }
+
+    if (visiting.has(pkg.name)) {
+      console.warn(`Detected cyclic dependency while ordering ${pkg.name}`);
+      return;
+    }
+
+    visiting.add(pkg.name);
+
+    for (const dep of pkg.localDependencies) {
+      const depPkg = packageMap.get(dep);
+      if (depPkg) {
+        visit(depPkg);
+      }
+    }
+
+    visiting.delete(pkg.name);
+    visited.add(pkg.name);
+    ordered.push(pkg);
+  };
+
+  for (const pkg of packages) {
+    visit(pkg);
+  }
+
+  return ordered;
+}
+
+async function rustPackageVersionExists(name: string, version: string): Promise<boolean> {
+  try {
+    const output = await captureCommand('cargo', ['search', name, '--limit', '1'], repoRoot);
+    return output
+      .split(/\r?\n/)
+      .some(line => line.startsWith(`${name} = "${version}"`));
   } catch {
     return false;
   }

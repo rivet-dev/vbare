@@ -1,7 +1,7 @@
 import * as V1 from "../dist/v1";
 import * as V2 from "../dist/v2";
 import * as V3 from "../dist/v3";
-import { createVersionedDataHandler, type MigrationFn } from "vbare";
+import { createVersionedDataHandler, type VersionedDataConfig } from "vbare";
 
 export function migrateV1TodoToV2(todo: V1.Todo): V2.Todo {
 	return {
@@ -63,51 +63,82 @@ export function migrateV2ToV3App(app: V2.App): V3.App {
 // Set up versioned migration handler using the vbare package.
 export const CURRENT_VERSION = 3 as const;
 
-// Map migrations as fromVersion -> (data) => nextVersionData
-export const migrations = new Map<number, MigrationFn<any, any>>([
-	[1, (data: V1.App) => migrateV1ToV2App(data)],
-	[2, (data: V2.App) => migrateV2ToV3App(data)],
-]);
+// Converters for upgrade/downgrade paths, using direct types.
+function v1_to_v2_any(x: any): V2.App {
+  return migrateV1ToV2App(x as V1.App);
+}
 
-// Handlers per starting version that use the actual BARE encode/decode.
-// Note: We only rely on deserialize() for migration sequencing; serializeVersion is
-// set to the latest version's encoder for completeness.
-const APP_FROM_V1 = createVersionedDataHandler<V3.App>({
-	currentVersion: CURRENT_VERSION,
-	migrations,
-	serializeVersion: (data: V3.App) => V3.encodeApp(data),
-	deserializeVersion: (bytes: Uint8Array) =>
-		V1.decodeApp(bytes) as unknown as V3.App,
-});
+function v2_to_v3_any(x: any): V3.App {
+  return migrateV2ToV3App(x as V2.App);
+}
 
-const APP_FROM_V2 = createVersionedDataHandler<V3.App>({
-	currentVersion: CURRENT_VERSION,
-	migrations,
-	serializeVersion: (data: V3.App) => V3.encodeApp(data),
-	deserializeVersion: (bytes: Uint8Array) =>
-		V2.decodeApp(bytes) as unknown as V3.App,
-});
+// Optional downgrades to mirror Rust API
+function v3_to_v2_any(x: any): V2.App {
+  const app = x as V3.App;
+  const todos = new Map<V2.TodoId, V2.Todo>();
+  for (const [id, t] of app.todos) {
+    const tags: string[] = [];
+    for (const [, tag] of t.detail.tags) tags.push(tag.name);
+    const status = t.status as unknown as V2.TodoStatus;
+    todos.set(id as unknown as V2.TodoId, {
+      id: id as unknown as V2.TodoId,
+      title: t.detail.title,
+      status,
+      createdAt: t.createdAt as unknown as V2.u64,
+      tags,
+    });
+  }
+  return { todos, settings: new Map<string, string>() } as V2.App;
+}
 
-const APP_FROM_V3 = createVersionedDataHandler<V3.App>({
-	currentVersion: CURRENT_VERSION,
-	migrations,
-	serializeVersion: (data: V3.App) => V3.encodeApp(data),
-	deserializeVersion: (bytes: Uint8Array) => V3.decodeApp(bytes),
-});
+function v2_to_v1_any(x: any): V1.App {
+  const app = x as V2.App;
+  const todos: V1.Todo[] = [];
+  for (const [, t] of app.todos) {
+    const done = t.status === V2.TodoStatus.Done;
+    todos.push({ id: Number(t.id) as V1.TodoId, title: t.title, done });
+  }
+  return { todos } as V1.App;
+}
+
+const CONFIG: VersionedDataConfig<V3.App> = {
+  deserializeVersion: (bytes: Uint8Array, version: number): any => {
+    switch (version) {
+      case 1:
+        return V1.decodeApp(bytes);
+      case 2:
+        return V2.decodeApp(bytes);
+      case 3:
+        return V3.decodeApp(bytes);
+      default:
+        throw new Error(`invalid version: ${version}`);
+    }
+  },
+  serializeVersion: (data: any, version: number): Uint8Array => {
+    switch (version) {
+      case 1:
+        return V1.encodeApp(data as V1.App);
+      case 2:
+        return V2.encodeApp(data as V2.App);
+      case 3:
+        return V3.encodeApp(data as V3.App);
+      default:
+        throw new Error(`invalid version: ${version}`);
+    }
+  },
+  deserializeConverters: () => [v1_to_v2_any, v2_to_v3_any],
+  serializeConverters: () => [v3_to_v2_any, v2_to_v1_any],
+};
+
+const HANDLER = createVersionedDataHandler(CONFIG);
 
 export function migrateToLatest(
 	app: V1.App | V2.App | V3.App,
 	fromVersion: 1 | 2 | 3,
 ): V3.App {
-	if (fromVersion === 1) {
-		const bytes = V1.encodeApp(app as V1.App);
-		return APP_FROM_V1.deserialize(bytes, 1);
-	}
-	if (fromVersion === 2) {
-		const bytes = V2.encodeApp(app as V2.App);
-		return APP_FROM_V2.deserialize(bytes, 2);
-	}
-	// v3 -> v3
-	const bytes = V3.encodeApp(app as V3.App);
-	return APP_FROM_V3.deserialize(bytes, 3);
+	let bytes: Uint8Array;
+	if (fromVersion === 1) bytes = V1.encodeApp(app as V1.App);
+	else if (fromVersion === 2) bytes = V2.encodeApp(app as V2.App);
+	else bytes = V3.encodeApp(app as V3.App);
+  return HANDLER.deserialize(bytes, fromVersion);
 }

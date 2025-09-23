@@ -7,8 +7,16 @@ use vbare::OwnedVersionedData;
 fn migrates_v1_to_v3() {
     let app_v1 = schemas::v1::App {
         todos: vec![
-            schemas::v1::Todo { id: 1, title: "a".into(), done: false },
-            schemas::v1::Todo { id: 2, title: "b".into(), done: true },
+            schemas::v1::Todo {
+                id: 1,
+                title: "a".into(),
+                done: false,
+            },
+            schemas::v1::Todo {
+                id: 2,
+                title: "b".into(),
+                done: true,
+            },
         ],
     };
 
@@ -23,14 +31,20 @@ fn migrates_v1_to_v3() {
 #[test]
 fn migrates_v2_to_v3_with_tags() {
     let mut todos: HashMap<schemas::v2::TodoId, schemas::v2::Todo> = HashMap::new();
-    todos.insert(5, schemas::v2::Todo {
-        id: 5,
-        title: "with-tags".into(),
-        status: schemas::v2::TodoStatus::Open,
-        created_at: 42,
-        tags: vec!["red".into(), "blue".into()],
-    });
-    let app_v2 = schemas::v2::App { todos, settings: HashMap::new() };
+    todos.insert(
+        5,
+        schemas::v2::Todo {
+            id: 5,
+            title: "with-tags".into(),
+            status: schemas::v2::TodoStatus::Open,
+            created_at: 42,
+            tags: vec!["red".into(), "blue".into()],
+        },
+    );
+    let app_v2 = schemas::v2::App {
+        todos,
+        settings: HashMap::new(),
+    };
     let bytes = serde_bare::to_vec(&app_v2).unwrap();
     let migrated = AppVersioned::deserialize(&bytes, 2).unwrap();
 
@@ -56,14 +70,20 @@ fn serializes_v3_to_v1() {
                 user_id: None,
                 team_id: None,
             },
-            detail: schemas::v3::TodoDetail { title: "hello".into(), tags: HashMap::new() },
+            detail: schemas::v3::TodoDetail {
+                title: "hello".into(),
+                tags: HashMap::new(),
+            },
             history: Vec::new(),
         },
     );
 
     let app_v3 = schemas::v3::App {
         todos,
-        config: schemas::v3::AppConfig { theme: schemas::v3::Theme::System, features: HashMap::new() },
+        config: schemas::v3::AppConfig {
+            theme: schemas::v3::Theme::System,
+            features: HashMap::new(),
+        },
         boards: HashMap::new(),
     };
 

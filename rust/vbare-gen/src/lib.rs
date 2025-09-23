@@ -264,7 +264,7 @@ impl SchemaGenerator {
 		let fields_gen = self.gen_struct_field(name, fields_clone);
 		self.gen_anonymous(name, |ident| {
             quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
                 pub struct #ident {
                     #(#fields_gen),*
                 }
@@ -317,7 +317,7 @@ impl SchemaGenerator {
 		}
 		self.gen_anonymous(name, |ident| {
             quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
                 pub enum #ident {
                     #(#members_def),*
                 }
@@ -365,7 +365,7 @@ impl SchemaGenerator {
 		});
         self.gen_anonymous(name, |ident| {
             quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, Clone)]
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, Hash, Clone)]
                 #[repr(usize)]
                 pub enum #ident {
                     #(#member_defs),*

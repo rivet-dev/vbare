@@ -6,47 +6,42 @@ export interface VersionedData<T> {
 
 // OwnedVersionedData-like config for TypeScript
 // Mirrors rust/vbare/src/lib.rs OwnedVersionedData methods.
-export interface OwnedVersionedDataConfig<S, L> {
-  // Construct a Self from latest
-  latest: (latest: L) => S;
-  // Extract the latest from Self; throws on error
-  into_latest: (data: S) => L;
-
+export interface VersionedDataConfig<S> {
   // Per-version raw (de)serializers
-  deserialize_version: (bytes: Uint8Array, version: number) => S;
-  serialize_version: (data: S, version: number) => Uint8Array;
+  deserializeVersion: (bytes: Uint8Array, version: number) => any;
+  serializeVersion: (data: any, version: number) => Uint8Array;
 
   // Converter chains.
-  // - deserialize_converters[i]: converts from version (i+1) to (i+2)
-  // - serialize_converters[i]: converts towards older versions (see notes below)
-  deserialize_converters: () => Array<(data: S) => S>;
-  serialize_converters: () => Array<(data: S) => S>;
+  // - deserializeConverters[i]: converts from version (i+1) to (i+2)
+  // - serializeConverters[i]: converts towards older versions (see notes below)
+  deserializeConverters: () => Array<(data: any) => any>;
+  serializeConverters: () => Array<(data: any) => any>;
 }
 
 // Keep class name for minimal surface change; now generic over S (Self) and L (Latest)
-export class VersionedDataHandler<S, L> {
-  constructor(private config: OwnedVersionedDataConfig<S, L>) {}
+export class VersionedDataHandler<S> {
+  constructor(private config: VersionedDataConfig<S>) {}
 
   // Deserialize bytes of a given version into latest L
-  deserialize(bytes: Uint8Array, version: number): L {
-    let data: S = this.config.deserialize_version(bytes, version);
-    const converters = this.config.deserialize_converters();
+  deserialize(bytes: Uint8Array, version: number): S {
+    let data: any = this.config.deserializeVersion(bytes, version);
+    const converters = this.config.deserializeConverters();
     // Apply converters from `version` onward to reach latest
     for (let i = Math.max(0, version - 1); i < converters.length; i++) {
       data = converters[i](data);
     }
-    return this.config.into_latest(data);
+    return data as S;
   }
 
   // Serialize an S (which may represent any version) to target `version`
   serialize(data: S, version: number): Uint8Array {
-    let cur: S = data;
-    const converters = this.config.serialize_converters();
+    let cur: any = data;
+    const converters = this.config.serializeConverters();
     // Apply converters starting from `version - 1` (mirrors Rust skip logic)
     for (let i = Math.max(0, version - 1); i < converters.length; i++) {
       cur = converters[i](cur);
     }
-    return this.config.serialize_version(cur, version);
+    return this.config.serializeVersion(cur, version);
   }
 
   // Helpers that embed a u16 (LE) version prefix, like Rust
@@ -60,7 +55,7 @@ export class VersionedDataHandler<S, L> {
     return out;
   }
 
-  deserializeWithEmbeddedVersion(bytes: Uint8Array): L {
+  deserializeWithEmbeddedVersion(bytes: Uint8Array): S {
     if (bytes.length < 2) {
       throw new Error("payload too short for embedded version");
     }
@@ -91,8 +86,8 @@ export class VersionedDataHandler<S, L> {
   }
 }
 
-export function createVersionedDataHandler<S, L>(
-  config: OwnedVersionedDataConfig<S, L>,
-): VersionedDataHandler<S, L> {
+export function createVersionedDataHandler<S>(
+  config: VersionedDataConfig<S>,
+): VersionedDataHandler<S> {
   return new VersionedDataHandler(config);
 }

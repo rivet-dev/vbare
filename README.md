@@ -71,13 +71,13 @@ Servers need to include converters between all versions.
 
 Clients only need to inlucde a single version of the schema since the server is responsible for version conversion no matter what version you connect with.
 
-**Embedded vs Negotiated Versions**
+**Embedded vs Pre-Negotiated Versions**
 
 Every message has a version associated with it. This version is either:
 
-- Pre-negotiated (via mechanisms like HTTP request query parameters or handshakes)
-    - For example, you can extract the version from a request like `POST /v3/users`
-- Embedded in the message itself in the first 2 bytes of the message (see below)
+- **Embedded** in the message itself in the first 2 bytes of the message (see below)
+- **Pre-negotiated** via mechanisms like HTTP request query parameters or handshakes
+    - For example, you can extract the version from a request like `POST /v3/users` as `v3`
 
 **Embedded Binary Format**
 
@@ -96,10 +96,10 @@ The layout looks like this:
 
 The core of why VBARE was designed this way is:
 
-- Manual evolutions simplify application logic by putting all complex evolutions & defaults in a conversion code instead of inside your core applciation logic
-- Manual evolution forces you to handle edge cases of migrations & breaking changes at the cost of more verbose migration code
-- Stop making big breaking v1 to v2 changes — instead, make much smaller schema changes with more flexibility
-- Schema evolution frequently requires more than just renaming properties (like Protobuf, Flatbuffers, Cap'n'proto) — more complicated reshaping & fetching data from remote sources is commonly needed
+- Manual evolutions **simplifies application logic** by putting all complex evolutions & defaults in a conversion code instead of inside your core application logic
+- Manual evolution **forces developers to handle edge cases** of migrations & breaking changes at the cost of more verbose migration code
+- Stop making big breaking v1 to v2 changes — instead, **make much smaller schema changes** with more flexibility
+- Schema evolution frequently requires more than just renaming properties (like Protobuf, Flatbuffers, Cap'n'proto) — **more complicated reshaping & fetching data** from remote sources is commonly needed
 
 ## Implementations
 

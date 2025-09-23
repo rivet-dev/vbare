@@ -9,7 +9,11 @@ fn processes_basic_fixtures() {
     fixtures_dir.pop(); // up to repo root
     fixtures_dir.push("fixtures/tests/basic");
 
-    assert!(fixtures_dir.is_dir(), "fixtures dir missing: {}", fixtures_dir.display());
+    assert!(
+        fixtures_dir.is_dir(),
+        "fixtures dir missing: {}",
+        fixtures_dir.display()
+    );
 
     // Create a dedicated OUT_DIR for the test and set env var
     let out_dir = tempfile::tempdir().expect("create tempdir for OUT_DIR");
@@ -32,7 +36,10 @@ fn processes_basic_fixtures() {
         // - map<K, V> -> map<K><V>
         let mut normalized = String::new();
         for line in content_raw.lines() {
-            let line_wo_comment = match line.find("//") { Some(i) => &line[..i], None => line };
+            let line_wo_comment = match line.find("//") {
+                Some(i) => &line[..i],
+                None => line,
+            };
             let trimmed = line_wo_comment.trim_start();
             let converted = if trimmed.starts_with("enum ") {
                 let rest = &trimmed["enum ".len()..];
@@ -65,17 +72,29 @@ fn processes_basic_fixtures() {
             // Reorder so that ChangeKind enum appears before Change struct, and both before Todo
             let mut lines_all: Vec<&str> = normalized.lines().collect();
 
-            fn extract_block<'a>(lines: &mut Vec<&'a str>, start_pred: &str) -> Option<Vec<&'a str>> {
-                let start = lines.iter().position(|l| l.trim_start().starts_with(start_pred))?;
+            fn extract_block<'a>(
+                lines: &mut Vec<&'a str>,
+                start_pred: &str,
+            ) -> Option<Vec<&'a str>> {
+                let start = lines
+                    .iter()
+                    .position(|l| l.trim_start().starts_with(start_pred))?;
                 let mut end = start;
                 let mut brace_count = 0i32;
                 let mut seen_open = false;
                 for i in start..lines.len() {
                     let l = lines[i];
-                    if l.contains('{') { brace_count += 1; seen_open = true; }
-                    if l.contains('}') { brace_count -= 1; }
+                    if l.contains('{') {
+                        brace_count += 1;
+                        seen_open = true;
+                    }
+                    if l.contains('}') {
+                        brace_count -= 1;
+                    }
                     end = i;
-                    if seen_open && brace_count == 0 { break; }
+                    if seen_open && brace_count == 0 {
+                        break;
+                    }
                 }
                 let block: Vec<&str> = lines[start..=end].to_vec();
                 lines.drain(start..=end);
@@ -92,8 +111,12 @@ fn processes_basic_fixtures() {
                     .unwrap_or(lines_all.len());
                 let mut rebuilt: Vec<&str> = Vec::new();
                 rebuilt.extend_from_slice(&lines_all[..insert_at]);
-                for l in kind_block.unwrap() { rebuilt.push(l); }
-                for l in change_block.unwrap() { rebuilt.push(l); }
+                for l in kind_block.unwrap() {
+                    rebuilt.push(l);
+                }
+                for l in change_block.unwrap() {
+                    rebuilt.push(l);
+                }
                 rebuilt.extend_from_slice(&lines_all[insert_at..]);
                 normalized = rebuilt.join("\n");
             }

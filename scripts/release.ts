@@ -226,11 +226,20 @@ async function publishTypeScriptPackages(packages: PublishableTypeScriptPackage[
       continue;
     }
 
-    await runCommand(
-      'pnpm',
-      ['--filter', pkg.name, 'publish', '--access', 'public', '--tag', tag],
-      path.join(repoRoot, 'typescript')
-    );
+    try {
+      await runCommand(
+        'pnpm',
+        ['--filter', pkg.name, 'publish', '--access', 'public', '--tag', tag],
+        path.join(repoRoot, 'typescript')
+      );
+    } catch (error) {
+      if (await packageVersionExists(pkg.name, version)) {
+        console.warn(`Publish failed but ${pkg.name}@${version} is already available, skipping`);
+        continue;
+      }
+
+      throw error;
+    }
   }
 
   console.log(`Published TypeScript packages with tag '${tag}'`);

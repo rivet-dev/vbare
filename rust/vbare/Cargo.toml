@@ -1,0 +1,11 @@
+[package]
+name = "vbare"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_bare.workspace = true

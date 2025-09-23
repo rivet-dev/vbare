@@ -1,0 +1,22 @@
+[workspace]
+members = ["bare-gen", "compiler", "vbare"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+anyhow = "1.0"
+heck = "0.5"
+indoc = "2.0"
+pest = "2.7"
+pest_derive = "2.7"
+prettyplease = "0.2"
+proc-macro2 = "1.0"
+quote = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_bare = "0.5"
+syn = "2.0"

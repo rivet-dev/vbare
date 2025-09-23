@@ -1,0 +1,30 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig.json", "tsup.config.ts", "package.json"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "check-types": {
+      "inputs": [
+        "src/**",
+        "tsconfig.json",
+        "tsup.config.ts",
+        "package.json"
+      ],
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "inputs": ["src/**", "tests/**", "package.json"],
+      "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

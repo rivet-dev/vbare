@@ -1,0 +1,10 @@
+[package]
+name = "compiler"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bare_gen = { path = "../bare-gen" }
+indoc.workspace = true
+prettyplease.workspace = true
+syn.workspace = true

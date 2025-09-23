@@ -1,0 +1,19 @@
+on:
+  pull_request:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: corepack enable
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: ./typescript
+      - name: Build packages
+        run: pnpm build
+        working-directory: ./typescript
+      - name: Publish preview packages
+        run: pnpm dlx pkg-pr-new publish 'compiler' 'vbare' --packageManager pnpm
+        working-directory: ./typescript

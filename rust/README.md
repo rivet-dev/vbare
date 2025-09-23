@@ -5,6 +5,7 @@
 - `vbare-gen`: Code generator that parses `.bare` schemas and emits Rust types
 - `vbare-compiler`: Build-script helper that processes a directory of schemas
 - `vbare`: Runtime traits for versioned data with helpers to serialize/deserialize across versions
+    - [crates.io package: `vbare`](https://crates.io/crates/vbare)
 
 ## Quick Start
 

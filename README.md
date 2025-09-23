@@ -104,8 +104,10 @@ The core of why VBARE was designed this way is:
 ## Implementations
 
 - [TypeScript](./typescript/)
+    - [npm package: `vbare`](https://www.npmjs.com/package/vbare)
     - [Example Code](./typescript/examples/basic/src/migrator.ts)
 - [Rust](./rust/)
+    - [crates.io package: `vbare`](https://crates.io/crates/vbare)
     - [Example Code](./rust/examples/basic/src/lib.rs)
 
 ([Full list of BARE implementations](https://baremessages.org/))

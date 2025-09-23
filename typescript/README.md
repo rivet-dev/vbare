@@ -3,6 +3,7 @@
 ## Packages
 
 - `vbare`: Runtime helpers exposed as the `vbare` package. The primary entry point is `createVersionedDataHandler`, which mirrors the Rust `OwnedVersionedData` helpers.
+    - [npm package: `vbare`](https://www.npmjs.com/package/vbare)
 - `@vbare/compiler`: CLI + library published as `@vbare/compiler`. It wraps `@bare-ts/tools` and adds light preprocessing so fixtures compile without extra flags.
 - `@vbare/example-basic`: End-to-end sample that compiles schemas and wires migrations together. Generated sources live in `examples/basic/dist/` and hand-written logic in `examples/basic/src/`.
 

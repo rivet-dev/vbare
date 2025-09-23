@@ -13,9 +13,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            vbare: vbare_gen::Config {
-                use_hashable_map: false,
-            },
+            vbare: vbare_gen::Config::with_hash_map(),
         }
     }
 }
@@ -24,9 +22,14 @@ impl Config {
     /// Convenience helper to enable hashable maps in generated code.
     pub fn with_hashable_map() -> Self {
         Self {
-            vbare: vbare_gen::Config {
-                use_hashable_map: true,
-            },
+            vbare: vbare_gen::Config::with_hashable_map(),
+        }
+    }
+
+    /// Convenience helper to use the standard library `HashMap`.
+    pub fn with_hash_map() -> Self {
+        Self {
+            vbare: vbare_gen::Config::with_hash_map(),
         }
     }
 }
@@ -64,12 +67,7 @@ pub fn process_schemas_with_config(
             .ok_or("No file extension")?
             .0;
 
-        let tokens = vbare_gen::bare_schema(
-            &path,
-            vbare_gen::Config {
-                use_hashable_map: config.vbare.use_hashable_map,
-            },
-        );
+        let tokens = vbare_gen::bare_schema(&path, config.vbare);
         let ast = syn::parse2(tokens)?;
         let content = prettyplease::unparse(&ast);
 

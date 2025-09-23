@@ -69,24 +69,43 @@ export const migrations = new Map<number, MigrationFn<any, any>>([
   [2, (data: V2.App) => migrateV2ToV3App(data)],
 ]);
 
-// For this example we use JSON for (de)serialization to drive the migration flow.
-// The focus is on demonstrating the vbare migration wiring, not binary I/O.
-const jsonEncoder = new TextEncoder();
-const jsonDecoder = new TextDecoder();
-
-export const APP_VERSIONED = createVersionedDataHandler<V3.App>({
+// Handlers per starting version that use the actual BARE encode/decode.
+// Note: We only rely on deserialize() for migration sequencing; serializeVersion is
+// set to the latest version's encoder for completeness.
+const APP_FROM_V1 = createVersionedDataHandler<V3.App>({
   currentVersion: CURRENT_VERSION,
   migrations,
-  serializeVersion: (data: V3.App) => jsonEncoder.encode(JSON.stringify(data)),
-  deserializeVersion: (bytes: Uint8Array) => JSON.parse(jsonDecoder.decode(bytes)),
+  serializeVersion: (data: V3.App) => V3.encodeApp(data),
+  deserializeVersion: (bytes: Uint8Array) => V1.decodeApp(bytes) as unknown as V3.App,
+});
+
+const APP_FROM_V2 = createVersionedDataHandler<V3.App>({
+  currentVersion: CURRENT_VERSION,
+  migrations,
+  serializeVersion: (data: V3.App) => V3.encodeApp(data),
+  deserializeVersion: (bytes: Uint8Array) => V2.decodeApp(bytes) as unknown as V3.App,
+});
+
+const APP_FROM_V3 = createVersionedDataHandler<V3.App>({
+  currentVersion: CURRENT_VERSION,
+  migrations,
+  serializeVersion: (data: V3.App) => V3.encodeApp(data),
+  deserializeVersion: (bytes: Uint8Array) => V3.decodeApp(bytes),
 });
 
 export function migrateToLatest(
   app: V1.App | V2.App | V3.App,
   fromVersion: 1 | 2 | 3,
 ): V3.App {
-  if (fromVersion === 3) return app as V3.App;
-  // Use the versioned handler to apply migrations starting from fromVersion.
-  const bytes = jsonEncoder.encode(JSON.stringify(app));
-  return APP_VERSIONED.deserialize(bytes, fromVersion);
+  if (fromVersion === 1) {
+    const bytes = V1.encodeApp(app as V1.App);
+    return APP_FROM_V1.deserialize(bytes, 1);
+  }
+  if (fromVersion === 2) {
+    const bytes = V2.encodeApp(app as V2.App);
+    return APP_FROM_V2.deserialize(bytes, 2);
+  }
+  // v3 -> v3
+  const bytes = V3.encodeApp(app as V3.App);
+  return APP_FROM_V3.deserialize(bytes, 3);
 }

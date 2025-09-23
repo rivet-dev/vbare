@@ -38,6 +38,8 @@ async function main(): Promise<void> {
   await Promise.all(manifests.packageJson.map(file => updatePackageJson(file, version)));
   await Promise.all(manifests.cargoToml.map(file => updateCargoToml(file, version)));
 
+  await createAndPushCommit(version);
+
   await runCommand('pnpm', ['publish'], path.join(repoRoot, 'typescript'));
   await runCommand('cargo', ['publish'], path.join(repoRoot, 'rust'));
 }
@@ -168,6 +170,47 @@ async function runCommand(command: string, args: string[], cwd: string): Promise
     child.on('exit', code => {
       if (code === 0) {
         resolve();
+      } else {
+        reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
+      }
+    });
+  });
+}
+
+async function createAndPushCommit(version: string): Promise<void> {
+  if (!(await hasPendingChanges())) {
+    console.warn('No changes detected, skipping commit and push');
+    return;
+  }
+
+  await runCommand('git', ['add', '--all'], repoRoot);
+  await runCommand('git', ['commit', '-m', `chore: release ${version}`], repoRoot);
+  await runCommand('git', ['push'], repoRoot);
+}
+
+async function hasPendingChanges(): Promise<boolean> {
+  const output = await captureCommand('git', ['status', '--porcelain'], repoRoot);
+  return output.trim().length > 0;
+}
+
+async function captureCommand(command: string, args: string[], cwd: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'inherit'],
+      env: process.env
+    });
+
+    let output = '';
+
+    child.stdout?.on('data', chunk => {
+      output += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', code => {
+      if (code === 0) {
+        resolve(output);
       } else {
         reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
       }

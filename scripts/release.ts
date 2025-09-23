@@ -37,6 +37,7 @@ async function main(): Promise<void> {
 
   await Promise.all(manifests.packageJson.map(file => updatePackageJson(file, version)));
   await Promise.all(manifests.cargoToml.map(file => updateCargoToml(file, version)));
+  await updateReadmeVersions(version);
 
   const publishableTypeScriptPackages = await getPublishableTypeScriptPackages(manifests.packageJson);
   const publishableRustPackages = await getPublishableRustPackages(manifests.cargoToml);
@@ -142,6 +143,13 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
       }
     }
 
+    // Update workspace dependency versions (e.g., vbare-gen = { path = "../vbare-gen", version = "0.0.1" })
+    const depMatch = line.match(/^(\s*[A-Za-z0-9_-]+\s*=\s*{[^}]*path\s*=\s*"[^"]+",\s*version\s*=\s*")([^"]*)(".*})$/);
+    if (depMatch) {
+      updated = true;
+      return `${depMatch[1]}${version}${depMatch[3]}`;
+    }
+
     return line;
   });
 
@@ -157,6 +165,30 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
 
   await fs.writeFile(filePath, content, 'utf8');
   console.log(`Updated ${relative(filePath)} to ${version}`);
+}
+
+async function updateReadmeVersions(version: string): Promise<void> {
+  const readmePaths = [
+    path.join(repoRoot, 'rust', 'README.md'),
+    path.join(repoRoot, 'typescript', 'README.md')
+  ];
+
+  for (const readmePath of readmePaths) {
+    try {
+      const raw = await fs.readFile(readmePath, 'utf8');
+      const newline = raw.includes('\r\n') ? '\r\n' : '\n';
+
+      // Replace "FILL ME IN" with the actual version
+      const updated = raw.replace(/["']FILL ME IN["']/g, `"${version}"`);
+
+      if (updated !== raw) {
+        await fs.writeFile(readmePath, updated, 'utf8');
+        console.log(`Updated ${relative(readmePath)} versions to ${version}`);
+      }
+    } catch (error) {
+      console.warn(`Skipping ${relative(readmePath)} (file not found or error reading)`);
+    }
+  }
 }
 
 type PublishableTypeScriptPackage = {

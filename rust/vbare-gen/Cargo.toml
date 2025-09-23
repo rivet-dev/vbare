@@ -3,6 +3,7 @@ name = "vbare-gen"
 version.workspace = true
 authors.workspace = true
 license.workspace = true
+description = "Code generator for VBARE (Versioned Binary Application Record Encoding), an extension to BARE with versioned schema evolution"
 edition.workspace = true
 
 [dependencies]

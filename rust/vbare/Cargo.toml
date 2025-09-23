@@ -2,6 +2,9 @@
 name = "vbare"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Runtime library for VBARE (Versioned Binary Application Record Encoding), an extension to BARE with versioned schema evolution"
 
 [dependencies]
 anyhow.workspace = true

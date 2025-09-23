@@ -2,6 +2,8 @@
 name = "basic"
 version = "0.0.1"
 edition = "2021"
+description = "Basic example for VBARE (Versioned Binary Application Record Encoding), an extension to BARE with versioned schema evolution"
+license = "MIT"
 
 [lib]
 name = "basic"

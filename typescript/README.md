@@ -21,13 +21,23 @@
 }
 ```
 
-**Step 2: Compile your `.bare` schema files into TypeScript modules:**
+**Step 2: Add a build script to your `package.json`:**
 
-```bash
-pnpm --filter @vbare/compiler exec -- vbare-compiler schemas --out-dir src/dist
+```json
+{
+  "scripts": {
+    "bare:build": "vbare-compiler schemas --out-dir src/dist"
+  }
+}
 ```
 
-**Step 3: Import the generated modules in your project:**
+**Step 3: Compile your `.bare` schema files into TypeScript modules:**
+
+```bash
+pnpm bare:build
+```
+
+**Step 4: Import the generated modules in your project:**
 
 ```ts
 import * as V1 from "./dist/v1";
@@ -35,7 +45,7 @@ import * as V2 from "./dist/v2";
 import * as V3 from "./dist/v3";
 ```
 
-**Step 4: Create a handler that understands every version:**
+**Step 5: Create a handler that understands every version:**
 
 ```ts
 import { createVersionedDataHandler } from "vbare";

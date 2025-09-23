@@ -147,11 +147,13 @@ Usually, you just want a `ToServer` and `ToClient` union that looks like this:
 
 ### Isn't copying the schema going to result in a lot of duplicate code?
 
-Yes, but after enough pain and suffering from running production APIs, this is what you will end up doing manually anyway, but in a much more painful way. Having schema versions also makes it much easier to reason about how clients are connecting to your system and the state of an application. Incremental migrations don't let you consider other properties or structures. This approach also lets you reshape your structures more effectively.
+Yes, but after enough pain and suffering from running production APIs, this is what you will end up doing manually anyway — but in a much more painful way.
+
+Having schema versions also makes it much easier to reason about how clients are connecting to your system and the state of an application.
 
 ### Don't migration steps get repetitive?
 
-Most of the time, structures will match exactly, and most languages can provide a 1:1 migration. The most complicated migration steps will be for deeply nested structures that changed, but even that is relatively straightforward.
+Migration steps are fairly minimal to write. The most verbose migration steps will be for deeply nested structures that changed, but even that is relatively straightforward.
 
 ### What are the downsides?
 

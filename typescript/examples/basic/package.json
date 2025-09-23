@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "vbare-compiler ../../../fixtures/tests/basic/",
+    "check-types": "tsc --noEmit",
     "test": "pnpm build && vitest run",
     "test:watch": "pnpm build && vitest watch"
   },

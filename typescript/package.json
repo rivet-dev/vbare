@@ -1,5 +1,8 @@
 {
   "name": "vbare-workspace",
+  "version": "0.0.1",
+  "license": "MIT",
+  "author": "Rivet Gaming, Inc. <developer@rivet.dev>",
   "private": true,
   "packageManager": "pnpm@8.15.6",
   "scripts": {

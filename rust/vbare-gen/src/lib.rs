@@ -57,9 +57,7 @@ Then, within a Rust source file:
 
 ```ignore
 
-// Generate using the default config
-let config = bare_gen::Config { use_hashable_map: true };
-bare_gen::bare_schema(std::path::Path::new("schema.bare"), config); // TokenStream
+bare_gen::bare_schema("schema.bare"); // TokenStream
 
 ```
 
@@ -73,11 +71,8 @@ as cleanly or require additional explanation.
 
 ## Maps
 
-BARE maps are interpreted as either `HashMap<K, V>` or `HashableMap<K, V>` in Rust.
-This is controlled via the `Config` passed to `bare_schema`.
-
-- When `Config { use_hashable_map: true }`, maps use `rivet_util::serde::HashableMap`.
-- When `Config { use_hashable_map: false }`, maps use `std::collections::HashMap`.
+BARE maps are interpreted as `HashMap<K, V>` in Rust. As of now, this is not configurable, but
+may be in the future.
 
 ## Variable Length Integers
 
@@ -109,12 +104,11 @@ fn ident_from_string(s: &String) -> Ident {
 /// path is treated as relative to the file location of the macro's use.
 /// For details on how the BARE data model maps to the Rust data model, see the [`Serialize`
 /// derive macro's documentation.](https://docs.rs/serde_bare/latest/serde_bare/)
-pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStream {
+pub fn bare_schema(schema_path: &Path) -> proc_macro2::TokenStream {
 	let file = read_to_string(schema_path).unwrap();
 	let mut schema_generator = SchemaGenerator {
 		global_output: Default::default(),
 		user_type_registry: parse_string(&file),
-		config,
 	};
 
 	for (name, user_type) in &schema_generator.user_type_registry.clone() {
@@ -124,38 +118,27 @@ pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStre
 	schema_generator.complete()
 }
 
-pub struct Config {
-	pub use_hashable_map: bool,
-}
-
 struct SchemaGenerator {
 	global_output: Vec<TokenStream>,
 	user_type_registry: BTreeMap<String, AnyType>,
-	config: Config,
 }
 
 impl SchemaGenerator {
 	/// Completes a generation cycle by consuming the `SchemaGenerator` and yielding a
 	/// `TokenStream`.
-    fn complete(self) -> TokenStream {
-        let user_type_syntax = self.global_output;
-        let import_maps = if self.config.use_hashable_map {
-            quote! { #[allow(unused_imports)] use rivet_util::serde::HashableMap; }
-        } else {
-            TokenStream::new()
-        };
-        quote! {
-            #import_maps
-            #[allow(unused_imports)]
-            use std::collections::HashMap;
-            #[allow(unused_imports)]
-            use serde::{Serialize, Deserialize};
-            #[allow(unused_imports)]
-            use serde_bare::{Uint, Int};
+	fn complete(self) -> TokenStream {
+		let user_type_syntax = self.global_output;
+		quote! {
+			#[allow(unused_imports)]
+			use rivet_util::serde::HashableMap;
+			#[allow(unused_imports)]
+			use serde::{Serialize, Deserialize};
+			#[allow(unused_imports)]
+			use serde_bare::{Uint, Int};
 
-            #(#user_type_syntax)*
-        }
-    }
+			#(#user_type_syntax)*
+		}
+	}
 
 	/// `gen_user_type` is responsible for generating the token streams of a single user type at a top
 	/// level. Rust does not support anonymous structs/enums/etc., so we must recursively parse any
@@ -234,10 +217,8 @@ impl SchemaGenerator {
 	fn gen_map(&mut self, name: &String, key: &AnyType, value: &AnyType) -> TokenStream {
 		let key_def = self.dispatch_type(name, key);
 		let val_def = self.dispatch_type(name, value);
-		if self.config.use_hashable_map {
-			quote! { HashableMap<#key_def, #val_def> }
-		} else {
-			quote! { HashMap<#key_def, #val_def> }
+		quote! {
+			HashableMap<#key_def, #val_def>
 		}
 	}
 
@@ -263,14 +244,14 @@ impl SchemaGenerator {
 		let fields_clone = fields.clone();
 		let fields_gen = self.gen_struct_field(name, fields_clone);
 		self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-                pub struct #ident {
-                    #(#fields_gen),*
-                }
-            }
-        })
-    }
+			quote! {
+				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+				pub struct #ident {
+					#(#fields_gen),*
+				}
+			}
+		})
+	}
 
 	fn gen_union(&mut self, name: &String, members: &Vec<AnyType>) -> TokenStream {
 		let mut members_def: Vec<TokenStream> = Vec::with_capacity(members.len());
@@ -316,14 +297,14 @@ impl SchemaGenerator {
 			members_def.push(member_def);
 		}
 		self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-                pub enum #ident {
-                    #(#members_def),*
-                }
-            }
-        })
-    }
+			quote! {
+				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+				pub enum #ident {
+					#(#members_def),*
+				}
+			}
+		})
+	}
 
 	fn gen_option(&mut self, name: &String, inner: &AnyType) -> TokenStream {
 		let inner_def = self.dispatch_type(name, inner);
@@ -363,16 +344,16 @@ impl SchemaGenerator {
 				}
 			}
 		});
-        self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, Hash, Clone)]
-                #[repr(usize)]
-                pub enum #ident {
-                    #(#member_defs),*
-                }
-            }
-        })
-    }
+		self.gen_anonymous(name, |ident| {
+			quote! {
+				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, Hash, Clone)]
+				#[repr(usize)]
+				pub enum #ident {
+					#(#member_defs),*
+				}
+			}
+		})
+	}
 
 	/// `gen_anonymous` generates an identifier from the provided `name`, passed it to `inner`, pushes
 	/// the result of `inner` to the `registry`, and yields a quoted version of the generated
@@ -415,3 +396,4 @@ fn gen_primative_type_def(p: &PrimativeType) -> TokenStream {
 		Bool => quote! { bool },
 	}
 }
+

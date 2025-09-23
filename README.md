@@ -36,55 +36,70 @@ Also see the [IETF specification](https://www.ietf.org/archive/id/draft-devault-
 ## Project Goals
 
 **Goals:**
+
 - **Fast** — Self-contained binary encoding, similar to a tuple structure
 - **Simple** — Can be reimplemented in under an hour
 - **Portable** — Cross-language support with well-defined standardization
 
 **Non-goals:**
+
 - **Data compactness** — That's what gzip is for
-- **Provide an RPC layer** — This is trivial to implement yourself based on your specific requirements
+- **RPC layer** — This is trivial to implement yourself based on your specific requirements
 
 ## Use Cases
 
-- Defining network protocols
-- Storing data at rest that needs to be upgradeable:
-    - Binary data in databases
-    - File formats
+- **Network protocols** — Allow the server to cleanly evolve the protocol version without breaking old clients
+- **Data at rest** — Upgrade your file format without breaking old files
 
-## At a Glance
+## Overview
 
-- Every message has a version associated with it, either:
-    - Pre-negotiated (via mechanisms like HTTP request query parameters or handshakes)
-    - Embedded in the message itself
-- Applications provide functions to upgrade between protocol versions
-- There are no evolution semantics in the schema itself — simply copy and paste the schema to write a new version
+VBARE works by declaring a schema file for every possible version of the schema, then writing conversion functions between each version of the schema.
 
-## Evolution Philosophy
+**Versions**
 
-- Declare discrete versions with predefined version indexes
-- Manual evolutions simplify application logic by putting complex defaults in your application code
-- Stop making big breaking v1 to v2 changes — instead, make much smaller changes with more flexibility
-- Reshaping structures is important, not just changing types and names
+Each message has an associated version, an unsigned 16 bit integer. Each version of the protocol increases monotonically from 1 (e.g. `v1`, `v2`, `v3`). This version is specified in the file name (e.g. `my-schema/v1.bare`).
 
-## Specification
+**Schema Evolution & Converters**
 
-### Versions
+On your server, you manually define code that will convert between versions for both directions (upgrade for deserialization, downgrade for serialization).
 
-Each schema version is a monotonically incrementing integer. _[TODO: Specify exact integer type]_
+There are no evolution semantics in the schema itself — simply copy and paste from `v1` to `v2` the schema to write a new version.
 
-### Embedded Version
+**Servers vs Clients**
 
-Embedded version works by inserting an integer at the beginning of the buffer. This integer is used to define which version of the schema is being used. _[TODO: Specify exact integer type]_
+Servers need to include converters between all versions.
+
+Clients only need to inlucde a single version of the schema since the server is responsible for version conversion no matter what version you connect with.
+
+**Embedded vs Negotiated Versions**
+
+Every message has a version associated with it. This version is either:
+
+- Pre-negotiated (via mechanisms like HTTP request query parameters or handshakes)
+    - For example, you can extract the version from a request like `POST /v3/users`
+- Embedded in the message itself in the first 2 bytes of the message (see below)
+
+**Embedded Binary Format**
+
+Embedded version works by inserting an unsigned 16 bit integer at the beginning of the buffer. This integer is used to define which version of the schema is being used.
 
 The layout looks like this:
 
 ```
-[TODO: Add layout diagram]
++-------------------+-------------------+
+|  Schema Version   |    BARE Payload   |
+|   (uint16, 2B)    |   (variable N B)  |
++-------------------+-------------------+
 ```
 
-### Pre-negotiated Version
+## Philosophy
 
-Often, you specify the protocol version outside of the message itself. For example, when making an HTTP request with the version in the path like `POST /v3/users`, we can extract version 3 from the path. In this case, VBARE does not insert a version into the buffer. For this use case, VBARE simply acts as a step function for upgrading or downgrading version data structures.
+The core of why VBARE was designed this way is:
+
+- Manual evolutions simplify application logic by putting all complex evolutions & defaults in a conversion code instead of inside your core applciation logic
+- Manual evolution forces you to handle edge cases of migrations & breaking changes at the cost of more verbose migration code
+- Stop making big breaking v1 to v2 changes — instead, make much smaller schema changes with more flexibility
+- Schema evolution frequently requires more than just renaming properties (like Protobuf, Flatbuffers, Cap'n'proto) — more complicated reshaping & fetching data from remote sources is commonly needed
 
 ## Implementations
 
@@ -108,24 +123,9 @@ _Adding an implementation takes less than an hour — it's really that simple._
     - [Persisted state](https://github.com/rivet-dev/rivetkit/tree/b81d9536ba7ccad4449639dd83a770eb7c353617/packages/rivetkit/schemas/actor-persist)
     - [File system driver](https://github.com/rivet-dev/rivetkit/tree/b81d9536ba7ccad4449639dd83a770eb7c353617/packages/rivetkit/schemas/file-system-driver)
 
-## Embedded vs Negotiated Version
-
-_[TODO: Add detailed comparison]_
-
 ## Comparison with Other Formats
 
 [Read more](./docs/COMPARISON.md)
-
-## Clients vs Servers
-
-- Only servers need to have the evolution steps
-- Clients just send their version
-
-## Downsides
-
-- Extensive migration code required
-- The older the version, the more migration steps needed (though these migration steps should be effectively free)
-- Migration steps are not portable across languages, but only the server needs the migration steps, so this is usually only implemented once
 
 ## FAQ
 
@@ -153,6 +153,13 @@ Yes, but after enough pain and suffering from running production APIs, this is w
 
 Most of the time, structures will match exactly, and most languages can provide a 1:1 migration. The most complicated migration steps will be for deeply nested structures that changed, but even that is relatively straightforward.
 
+### What are the downsides?
+
+- More verbose migration code — but this is usually because VBARE forces you to handle all edge cases
+- The older the version, the more migration steps need that need to run to bring it to the latest version — though migration steps are usually negligible in cost
+- Migration steps are not portable across languages, but only the server needs the migration steps, so this is usually only implemented once
+
 ## License
 
 MIT
+

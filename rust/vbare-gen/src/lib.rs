@@ -32,8 +32,8 @@ type Customer struct {
   email: str
   address: Address
   orders: list<struct {
-	orderId: i64
-	quantity: i32
+    orderId: i64
+    quantity: i32
   }>
   metadata: map<str><data>
 }
@@ -88,7 +88,7 @@ more than 32 elements are converted into `Vec<T>`.
 use std::{collections::BTreeMap, fs::read_to_string, path::Path};
 
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use parser::{AnyType, PrimativeType, StructField, parse_string};
+use parser::{parse_string, AnyType, PrimativeType, StructField};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
@@ -97,34 +97,34 @@ mod parser;
 /// Configuration for `bare_schema` code generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Config {
-	/// When true, generated maps use `rivet_util::serde::HashableMap`.
-	pub use_hashable_map: bool,
+    /// When true, generated maps use `rivet_util::serde::HashableMap`.
+    pub use_hashable_map: bool,
 }
 
 impl Default for Config {
-	fn default() -> Self {
-		Self {
-			use_hashable_map: false,
-		}
-	}
+    fn default() -> Self {
+        Self {
+            use_hashable_map: false,
+        }
+    }
 }
 
 impl Config {
-	/// Convenience constructor to emit `HashMap` rather than `HashableMap`.
-	pub fn with_hash_map() -> Self {
-		Self::default()
-	}
+    /// Convenience constructor to emit `HashMap` rather than `HashableMap`.
+    pub fn with_hash_map() -> Self {
+        Self::default()
+    }
 
-	/// Convenience constructor to emit `HashableMap`.
-	pub fn with_hashable_map() -> Self {
-		Self {
-			use_hashable_map: true,
-		}
-	}
+    /// Convenience constructor to emit `HashableMap`.
+    pub fn with_hashable_map() -> Self {
+        Self {
+            use_hashable_map: true,
+        }
+    }
 }
 
 fn ident_from_string(s: &String) -> Ident {
-	Ident::new(s, Span::call_site())
+    Ident::new(s, Span::call_site())
 }
 
 /// `bare_schema` parses a BARE schema file and generates equivalent Rust code that is capable of
@@ -134,270 +134,267 @@ fn ident_from_string(s: &String) -> Ident {
 /// For details on how the BARE data model maps to the Rust data model, see the [`Serialize`
 /// derive macro's documentation.](https://docs.rs/serde_bare/latest/serde_bare/)
 pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStream {
-	let file = read_to_string(schema_path).unwrap();
-	let mut schema_generator = SchemaGenerator {
-		global_output: Default::default(),
-		user_type_registry: parse_string(&file),
-		config,
-	};
+    let file = read_to_string(schema_path).unwrap();
+    let mut schema_generator = SchemaGenerator {
+        global_output: Default::default(),
+        user_type_registry: parse_string(&file),
+        config,
+    };
 
-	for (name, user_type) in &schema_generator.user_type_registry.clone() {
-		schema_generator.gen_user_type(&name, &user_type);
-	}
+    for (name, user_type) in &schema_generator.user_type_registry.clone() {
+        schema_generator.gen_user_type(&name, &user_type);
+    }
 
-	schema_generator.complete()
+    schema_generator.complete()
 }
 
 struct SchemaGenerator {
-	global_output: Vec<TokenStream>,
-	user_type_registry: BTreeMap<String, AnyType>,
-	config: Config,
+    global_output: Vec<TokenStream>,
+    user_type_registry: BTreeMap<String, AnyType>,
+    config: Config,
 }
 
 impl SchemaGenerator {
-	/// Completes a generation cycle by consuming the `SchemaGenerator` and yielding a
-	/// `TokenStream`.
-	fn complete(self) -> TokenStream {
-		let SchemaGenerator {
-			global_output,
-			..
-		} = self;
-		quote! {
-			#[allow(unused_imports)]
-			use serde::{Serialize, Deserialize};
-			#[allow(unused_imports)]
-			use serde_bare::{Uint, Int};
+    /// Completes a generation cycle by consuming the `SchemaGenerator` and yielding a
+    /// `TokenStream`.
+    fn complete(self) -> TokenStream {
+        let SchemaGenerator { global_output, .. } = self;
+        quote! {
+            #[allow(unused_imports)]
+            use serde::{Serialize, Deserialize};
+            #[allow(unused_imports)]
+            use serde_bare::{Uint, Int};
 
-			#(#global_output)*
-		}
-	}
+            #(#global_output)*
+        }
+    }
 
-	/// `gen_user_type` is responsible for generating the token streams of a single user type at a top
-	/// level. Rust does not support anonymous structs/enums/etc., so we must recursively parse any
-	/// anonymous definitions and generate top-level definitions. As such, this function may generate
-	/// multiple types.
-	fn gen_user_type(&mut self, name: &String, t: &AnyType) {
-		#[allow(unused_assignments)]
-		use AnyType::*;
-		let def = match t {
-			Primative(p) => {
-				let def = gen_primative_type_def(p);
-				let ident = ident_from_string(name);
-				quote! {
-					pub type #ident = #def;
-				}
-			}
-			List { inner, length } => {
-				let def = self.gen_list(name, inner.as_ref(), length);
-				let ident = ident_from_string(name);
-				quote! {
-					pub type #ident = #def;
-				}
-			}
-			Struct(fields) => {
-				self.gen_struct(name, fields);
-				// `gen_struct` only has side-effects on the registry, so we return nothing
-				TokenStream::new()
-			}
-			Map { key, value } => {
-				let map_def = self.gen_map(name, key.as_ref(), value.as_ref());
-				let ident = ident_from_string(name);
-				quote! {
-					pub type #ident = #map_def;
-				}
-			}
-			Optional(inner) => {
-				let inner_def = self.dispatch_type(name, inner);
-				let ident = ident_from_string(name);
-				quote! {
-					pub type #ident = #inner_def;
-				}
-			}
-			TypeReference(reference) => {
-				panic!("Type reference is not valid as a top level definition: {reference}")
-			}
-			Enum(members) => {
-				self.gen_enum(name, members);
-				// `gen_enum` only has side-effects on the registry, so we return nothing
-				TokenStream::new()
-			}
-			Union(members) => {
-				self.gen_union(name, members);
-				// `gen_union` only has side-effects on the registry, so we return nothing
-				TokenStream::new()
-			}
-		};
-		self.global_output.push(def);
-	}
+    /// `gen_user_type` is responsible for generating the token streams of a single user type at a top
+    /// level. Rust does not support anonymous structs/enums/etc., so we must recursively parse any
+    /// anonymous definitions and generate top-level definitions. As such, this function may generate
+    /// multiple types.
+    fn gen_user_type(&mut self, name: &String, t: &AnyType) {
+        #[allow(unused_assignments)]
+        use AnyType::*;
+        let def = match t {
+            Primative(p) => {
+                let def = gen_primative_type_def(p);
+                let ident = ident_from_string(name);
+                quote! {
+                    pub type #ident = #def;
+                }
+            }
+            List { inner, length } => {
+                let def = self.gen_list(name, inner.as_ref(), length);
+                let ident = ident_from_string(name);
+                quote! {
+                    pub type #ident = #def;
+                }
+            }
+            Struct(fields) => {
+                self.gen_struct(name, fields);
+                // `gen_struct` only has side-effects on the registry, so we return nothing
+                TokenStream::new()
+            }
+            Map { key, value } => {
+                let map_def = self.gen_map(name, key.as_ref(), value.as_ref());
+                let ident = ident_from_string(name);
+                quote! {
+                    pub type #ident = #map_def;
+                }
+            }
+            Optional(inner) => {
+                let inner_def = self.dispatch_type(name, inner);
+                let ident = ident_from_string(name);
+                quote! {
+                    pub type #ident = #inner_def;
+                }
+            }
+            TypeReference(reference) => {
+                panic!("Type reference is not valid as a top level definition: {reference}")
+            }
+            Enum(members) => {
+                self.gen_enum(name, members);
+                // `gen_enum` only has side-effects on the registry, so we return nothing
+                TokenStream::new()
+            }
+            Union(members) => {
+                self.gen_union(name, members);
+                // `gen_union` only has side-effects on the registry, so we return nothing
+                TokenStream::new()
+            }
+        };
+        self.global_output.push(def);
+    }
 
-	fn dispatch_type(&mut self, name: &String, any_type: &AnyType) -> TokenStream {
-		match any_type {
-			AnyType::Primative(p) => gen_primative_type_def(p),
-			AnyType::List { inner, length } => self.gen_list(name, inner.as_ref(), length),
-			AnyType::Struct(fields) => self.gen_struct(name, fields),
-			AnyType::Enum(members) => self.gen_enum(name, members),
-			AnyType::Map { key, value } => self.gen_map(name, key.as_ref(), value.as_ref()),
-			AnyType::Union(members) => self.gen_union(name, members),
-			AnyType::Optional(inner) => self.gen_option(name, inner),
-			AnyType::TypeReference(i) => {
-				let ident = ident_from_string(i);
-				quote! { #ident }
-			}
-		}
-	}
+    fn dispatch_type(&mut self, name: &String, any_type: &AnyType) -> TokenStream {
+        match any_type {
+            AnyType::Primative(p) => gen_primative_type_def(p),
+            AnyType::List { inner, length } => self.gen_list(name, inner.as_ref(), length),
+            AnyType::Struct(fields) => self.gen_struct(name, fields),
+            AnyType::Enum(members) => self.gen_enum(name, members),
+            AnyType::Map { key, value } => self.gen_map(name, key.as_ref(), value.as_ref()),
+            AnyType::Union(members) => self.gen_union(name, members),
+            AnyType::Optional(inner) => self.gen_option(name, inner),
+            AnyType::TypeReference(i) => {
+                let ident = ident_from_string(i);
+                quote! { #ident }
+            }
+        }
+    }
 
-	fn gen_map(&mut self, name: &String, key: &AnyType, value: &AnyType) -> TokenStream {
-		let key_def = self.dispatch_type(name, key);
-		let val_def = self.dispatch_type(name, value);
-		if self.config.use_hashable_map {
-			quote! {
-				rivet_util::serde::HashableMap<#key_def, #val_def>
-			}
-		} else {
-			quote! {
-				std::collections::HashMap<#key_def, #val_def>
-			}
-		}
-	}
+    fn gen_map(&mut self, name: &String, key: &AnyType, value: &AnyType) -> TokenStream {
+        let key_def = self.dispatch_type(name, key);
+        let val_def = self.dispatch_type(name, value);
+        if self.config.use_hashable_map {
+            quote! {
+                rivet_util::serde::HashableMap<#key_def, #val_def>
+            }
+        } else {
+            quote! {
+                std::collections::HashMap<#key_def, #val_def>
+            }
+        }
+    }
 
-	fn gen_list(
-		&mut self,
-		name: &String,
-		inner_type: &AnyType,
-		size: &Option<usize>,
-	) -> TokenStream {
-		let inner_def = self.dispatch_type(name, inner_type);
-		match *size {
-			Some(size) if size <= 32 => quote! {
-				[#inner_def; #size]
-			},
-			_ => quote! {
-				Vec<#inner_def>
-			},
-		}
-	}
+    fn gen_list(
+        &mut self,
+        name: &String,
+        inner_type: &AnyType,
+        size: &Option<usize>,
+    ) -> TokenStream {
+        let inner_def = self.dispatch_type(name, inner_type);
+        match *size {
+            Some(size) if size <= 32 => quote! {
+                [#inner_def; #size]
+            },
+            _ => quote! {
+                Vec<#inner_def>
+            },
+        }
+    }
 
-	fn gen_struct(&mut self, name: &String, fields: &Vec<StructField>) -> TokenStream {
-		// clone so we can safely drain this
-		let fields_clone = fields.clone();
-		let fields_gen = self.gen_struct_field(name, fields_clone);
-		let hash_derive = if self.config.use_hashable_map {
-			quote! { , Hash }
-		} else {
-			TokenStream::new()
-		};
-		self.gen_anonymous(name, |ident| {
-			quote! {
-				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
-				pub struct #ident {
-					#(#fields_gen),*
-				}
-			}
-		})
-	}
+    fn gen_struct(&mut self, name: &String, fields: &Vec<StructField>) -> TokenStream {
+        // clone so we can safely drain this
+        let fields_clone = fields.clone();
+        let fields_gen = self.gen_struct_field(name, fields_clone);
+        let hash_derive = if self.config.use_hashable_map {
+            quote! { , Hash }
+        } else {
+            TokenStream::new()
+        };
+        self.gen_anonymous(name, |ident| {
+            quote! {
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
+                pub struct #ident {
+                    #(#fields_gen),*
+                }
+            }
+        })
+    }
 
-	fn gen_union(&mut self, name: &String, members: &Vec<AnyType>) -> TokenStream {
-		let mut members_def: Vec<TokenStream> = Vec::with_capacity(members.len());
-		for (i, member) in members.iter().enumerate() {
-			// If this member is a user type alias for void, we'll not generate an inner type later
-			let is_void_type = match member {
-				AnyType::TypeReference(i) if self.user_type_registry.get(i).is_some() => {
-					let reference = self.user_type_registry.get(i).unwrap();
-					matches!(reference, AnyType::Primative(PrimativeType::Void))
-				}
-				_ => false,
-			};
+    fn gen_union(&mut self, name: &String, members: &Vec<AnyType>) -> TokenStream {
+        let mut members_def: Vec<TokenStream> = Vec::with_capacity(members.len());
+        for (i, member) in members.iter().enumerate() {
+            // If this member is a user type alias for void, we'll not generate an inner type later
+            let is_void_type = match member {
+                AnyType::TypeReference(i) if self.user_type_registry.get(i).is_some() => {
+                    let reference = self.user_type_registry.get(i).unwrap();
+                    matches!(reference, AnyType::Primative(PrimativeType::Void))
+                }
+                _ => false,
+            };
 
-			// This is to allow the `registry` binding to not shadow the function arg, but instead
-			// rebind it as it's used in the subsequent `gen_anonymous` call. We'll get move errors if
-			// we don't do it this way.
-			#[allow(unused_assignments)]
-			let mut member_def = TokenStream::new();
-			member_def = match member {
-				AnyType::Struct(fields) => {
-					let fields_defs = self.gen_struct_field(name, fields.clone());
-					quote! {
-						{
-							#(#fields_defs),*
-						}
-					}
-				}
-				AnyType::TypeReference(i) if is_void_type => {
-					let inner_def = ident_from_string(i);
-					// The `inner_def` is always a top-level type here
-					quote! {
-						#inner_def
-					}
-				}
-				_ => {
-					let inner_def = self.dispatch_type(&format!("{name}Member{i}"), member);
-					// The `inner_def` is always a top-level type here
-					quote! {
-						#inner_def(#inner_def)
-					}
-				}
-			};
-			members_def.push(member_def);
-		}
-		let hash_derive = if self.config.use_hashable_map {
-			quote! { , Hash }
-		} else {
-			TokenStream::new()
-		};
-		self.gen_anonymous(name, |ident| {
-			quote! {
-				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
-				pub enum #ident {
-					#(#members_def),*
-				}
-			}
-		})
-	}
+            // This is to allow the `registry` binding to not shadow the function arg, but instead
+            // rebind it as it's used in the subsequent `gen_anonymous` call. We'll get move errors if
+            // we don't do it this way.
+            #[allow(unused_assignments)]
+            let mut member_def = TokenStream::new();
+            member_def = match member {
+                AnyType::Struct(fields) => {
+                    let fields_defs = self.gen_struct_field(name, fields.clone());
+                    quote! {
+                        {
+                            #(#fields_defs),*
+                        }
+                    }
+                }
+                AnyType::TypeReference(i) if is_void_type => {
+                    let inner_def = ident_from_string(i);
+                    // The `inner_def` is always a top-level type here
+                    quote! {
+                        #inner_def
+                    }
+                }
+                _ => {
+                    let inner_def = self.dispatch_type(&format!("{name}Member{i}"), member);
+                    // The `inner_def` is always a top-level type here
+                    quote! {
+                        #inner_def(#inner_def)
+                    }
+                }
+            };
+            members_def.push(member_def);
+        }
+        let hash_derive = if self.config.use_hashable_map {
+            quote! { , Hash }
+        } else {
+            TokenStream::new()
+        };
+        self.gen_anonymous(name, |ident| {
+            quote! {
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
+                pub enum #ident {
+                    #(#members_def),*
+                }
+            }
+        })
+    }
 
-	fn gen_option(&mut self, name: &String, inner: &AnyType) -> TokenStream {
-		let inner_def = self.dispatch_type(name, inner);
-		quote! {
-		   Option<#inner_def>
-		}
-	}
+    fn gen_option(&mut self, name: &String, inner: &AnyType) -> TokenStream {
+        let inner_def = self.dispatch_type(name, inner);
+        quote! {
+           Option<#inner_def>
+        }
+    }
 
-	fn gen_struct_field(
-		&mut self,
-		struct_name: &String,
-		fields: Vec<StructField>,
-	) -> Vec<TokenStream> {
-		let mut fields_gen: Vec<TokenStream> = Vec::with_capacity(fields.len());
-		for StructField { name, type_r } in fields {
-			let name = name.to_snake_case();
-			#[allow(unused_assignments)]
-			let field_gen = self.dispatch_type(&format!("{struct_name}{name}"), &type_r);
-			let ident = ident_from_string(&name);
-			fields_gen.push(quote! {
-				pub #ident: #field_gen
-			})
-		}
-		fields_gen
-	}
+    fn gen_struct_field(
+        &mut self,
+        struct_name: &String,
+        fields: Vec<StructField>,
+    ) -> Vec<TokenStream> {
+        let mut fields_gen: Vec<TokenStream> = Vec::with_capacity(fields.len());
+        for StructField { name, type_r } in fields {
+            let name = name.to_snake_case();
+            #[allow(unused_assignments)]
+            let field_gen = self.dispatch_type(&format!("{struct_name}{name}"), &type_r);
+            let ident = ident_from_string(&name);
+            fields_gen.push(quote! {
+                pub #ident: #field_gen
+            })
+        }
+        fields_gen
+    }
 
-	fn gen_enum(&mut self, name: &String, members: &Vec<(String, Option<usize>)>) -> TokenStream {
-		let member_defs = members.iter().map(|(name, val)| {
-			let ident = ident_from_string(&name.to_upper_camel_case());
-			if let Some(val) = val {
-				quote! {
-					#ident = #val
-				}
-			} else {
-				quote! {
-					#ident
-				}
-			}
-		});
-		let hash_derive = if self.config.use_hashable_map {
-			quote! { Hash, }
-		} else {
-			TokenStream::new()
-		};
-		self.gen_anonymous(name, |ident| {
+    fn gen_enum(&mut self, name: &String, members: &Vec<(String, Option<usize>)>) -> TokenStream {
+        let member_defs = members.iter().map(|(name, val)| {
+            let ident = ident_from_string(&name.to_upper_camel_case());
+            if let Some(val) = val {
+                quote! {
+                    #ident = #val
+                }
+            } else {
+                quote! {
+                    #ident
+                }
+            }
+        });
+        let hash_derive = if self.config.use_hashable_map {
+            quote! { Hash, }
+        } else {
+            TokenStream::new()
+        };
+        self.gen_anonymous(name, |ident| {
 			quote! {
 				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, #hash_derive Clone)]
 				#[repr(usize)]
@@ -406,46 +403,46 @@ impl SchemaGenerator {
 				}
 			}
 		})
-	}
+    }
 
-	/// `gen_anonymous` generates an identifier from the provided `name`, passed it to `inner`, pushes
-	/// the result of `inner` to the `registry`, and yields a quoted version of the generated
-	/// identifier. This is a common operation when generating types that are anonymous in a BARE
-	/// schema but not allowed by be defined anonymously in Rust.
-	fn gen_anonymous(
-		&mut self,
-		name: &String,
-		inner: impl FnOnce(Ident) -> TokenStream,
-	) -> TokenStream {
-		let ident = ident_from_string(name);
-		self.global_output.push(inner(ident.clone()));
-		quote! {
-			#ident
-		}
-	}
+    /// `gen_anonymous` generates an identifier from the provided `name`, passed it to `inner`, pushes
+    /// the result of `inner` to the `registry`, and yields a quoted version of the generated
+    /// identifier. This is a common operation when generating types that are anonymous in a BARE
+    /// schema but not allowed by be defined anonymously in Rust.
+    fn gen_anonymous(
+        &mut self,
+        name: &String,
+        inner: impl FnOnce(Ident) -> TokenStream,
+    ) -> TokenStream {
+        let ident = ident_from_string(name);
+        self.global_output.push(inner(ident.clone()));
+        quote! {
+            #ident
+        }
+    }
 }
 
 fn gen_primative_type_def(p: &PrimativeType) -> TokenStream {
-	use PrimativeType::*;
-	match p {
-		UInt => quote! { Uint },
-		U64 => quote! { u64 },
-		U32 => quote! { u32 },
-		U16 => quote! { u16 },
-		U8 => quote! { u8 },
-		Int => quote! { Int },
-		I64 => quote! { i64 },
-		I32 => quote! { i32 },
-		I16 => quote! { i16 },
-		I8 => quote! { i8 },
-		F64 => quote! { f64 },
-		F32 => quote! { f32 },
-		Str => quote! { String },
-		Data(s) => match s {
-			Some(size) if *size <= 32 => quote! { [u8; #size] },
-			_ => quote! { Vec<u8> },
-		},
-		Void => quote! { () },
-		Bool => quote! { bool },
-	}
+    use PrimativeType::*;
+    match p {
+        UInt => quote! { Uint },
+        U64 => quote! { u64 },
+        U32 => quote! { u32 },
+        U16 => quote! { u16 },
+        U8 => quote! { u8 },
+        Int => quote! { Int },
+        I64 => quote! { i64 },
+        I32 => quote! { i32 },
+        I16 => quote! { i16 },
+        I8 => quote! { i8 },
+        F64 => quote! { f64 },
+        F32 => quote! { f32 },
+        Str => quote! { String },
+        Data(s) => match s {
+            Some(size) if *size <= 32 => quote! { [u8; #size] },
+            _ => quote! { Vec<u8> },
+        },
+        Void => quote! { () },
+        Bool => quote! { bool },
+    }
 }

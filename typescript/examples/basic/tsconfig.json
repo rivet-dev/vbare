@@ -9,6 +9,5 @@
     "target": "esnext",
     "types": ["node"]
   },
-  "include": ["src", "generated", "scripts", "vitest.config.ts"]
+  "include": ["src", "generated", "scripts"]
 }
-

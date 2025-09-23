@@ -1,0 +1,74 @@
+type TodoId u64
+type UserId u64
+type TeamId u64
+type TagId u32
+type BoardId u32
+type TodoStatus enum {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+type Priority enum {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+type AssigneeKind enum {
+  NONE
+  USER
+  TEAM
+}
+type Assignee struct {
+  kind: AssigneeKind
+  user_id: optional<UserId>
+  team_id: optional<TeamId>
+}
+type Tag struct {
+  id: TagId
+  name: str
+  color: optional<str>
+}
+type TodoDetail struct {
+  title: str
+  tags: map<TagId><Tag>
+}
+type ChangeKind enum {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  ASSIGNED
+  TAGGED
+}
+type Change struct {
+  at: u64
+  kind: ChangeKind
+}
+type Todo struct {
+  id: TodoId
+  status: TodoStatus
+  created_at: u64
+  priority: Priority
+  assignee: Assignee
+  detail: TodoDetail
+  history: list<Change>
+}
+type Theme enum {
+  LIGHT
+  DARK
+  SYSTEM
+}
+type AppConfig struct {
+  theme: Theme
+  features: map<str><bool>
+}
+type Board struct {
+  id: BoardId
+  name: str
+  columns: map<str><list<TodoId>>
+}
+type App struct {
+  todos: map<TodoId><Todo>
+  config: AppConfig
+  boards: map<BoardId><Board>
+}

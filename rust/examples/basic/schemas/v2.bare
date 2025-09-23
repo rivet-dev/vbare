@@ -1,0 +1,17 @@
+type TodoId u64
+type TodoStatus enum {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+type Todo struct {
+  id: TodoId
+  title: str
+  status: TodoStatus
+  created_at: u64
+  tags: list<str>
+}
+type App struct {
+  todos: map<TodoId><Todo>
+  settings: map<str><str>
+}

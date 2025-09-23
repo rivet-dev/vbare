@@ -21,30 +21,28 @@ export const APP_VERSIONED = createVersionedDataHandler<V3.App>({
 	serializeVersion: (data: any, version: number): Uint8Array => {
 		switch (version) {
 			case 1:
-				return V1.encodeApp(data as V1.App);
+				return V1.encodeApp(data);
 			case 2:
-				return V2.encodeApp(data as V2.App);
+				return V2.encodeApp(data);
 			case 3:
-				return V3.encodeApp(data as V3.App);
+				return V3.encodeApp(data);
 			default:
 				throw new Error(`invalid version: ${version}`);
 		}
 	},
 	// Use typed migrations and erase types at the array boundary
-	deserializeConverters: () =>
-		([migrateV1ToV2App, migrateV2ToV3App] as unknown as Array<(data: any) => any>),
-	serializeConverters: () =>
-		([migrateV3ToV2App, migrateV2ToV1App] as unknown as Array<(data: any) => any>),
+	deserializeConverters: () => [migrateV1ToV2App, migrateV2ToV3App],
+	serializeConverters: () => [migrateV3ToV2App, migrateV2ToV1App],
 });
 
 export function migrateV1TodoToV2(todo: V1.Todo): V2.Todo {
 	return {
-		id: BigInt(todo.id) as V2.TodoId,
+		id: BigInt(todo.id),
 		title: todo.title,
 		status: todo.done ? V2.TodoStatus.Done : V2.TodoStatus.Open,
-		createdAt: 0n as V2.u64,
+		createdAt: 0n,
 		tags: [],
-	} as V2.Todo;
+	};
 }
 
 export function migrateV1ToV2App(app: V1.App): V2.App {
@@ -56,68 +54,64 @@ export function migrateV1ToV2App(app: V1.App): V2.App {
 	return {
 		todos,
 		settings: new Map<string, string>(),
-	} as V2.App;
+	};
 }
 
 export function migrateV2TodoToV3(todo: V2.Todo): V3.Todo {
 	// Convert list<string> tags to map<TagId, Tag>
 	const tags = new Map<V3.TagId, V3.Tag>();
-	let nextTagId = 1 as V3.TagId; // simple incremental ids
+	let nextTagId = 1; // simple incremental ids
 	for (const name of todo.tags) {
-		const id = nextTagId as V3.TagId;
+		const id = nextTagId;
 		tags.set(id, { id, name, color: null });
-		nextTagId = ((nextTagId as unknown as number) + 1) as V3.TagId;
+		nextTagId = nextTagId + 1;
 	}
 
 	return {
-		id: todo.id as unknown as V3.TodoId,
-		status: todo.status as unknown as V3.TodoStatus,
-		createdAt: todo.createdAt as unknown as V3.u64,
+		...todo,
 		priority: V3.Priority.Medium,
 		assignee: { kind: V3.AssigneeKind.None, userId: null, teamId: null },
 		detail: { title: todo.title, tags },
 		history: [],
-	} as V3.Todo;
+	};
 }
 
 export function migrateV2ToV3App(app: V2.App): V3.App {
 	const todos = new Map<V3.TodoId, V3.Todo>();
 	for (const [id, t] of app.todos) {
 		const migrated = migrateV2TodoToV3(t);
-		todos.set(id as unknown as V3.TodoId, migrated);
+		todos.set(id, migrated);
 	}
 
 	return {
 		todos,
 		config: { theme: V3.Theme.System, features: new Map<string, boolean>() },
 		boards: new Map<V3.BoardId, V3.Board>(),
-	} as V3.App;
+	};
 }
 
-
-// Optional downgrades to mirror Rust API
 export function migrateV3ToV2App(app: V3.App): V2.App {
 	const todos = new Map<V2.TodoId, V2.Todo>();
 	for (const [id, t] of app.todos) {
 		const tags: string[] = [];
 		for (const [, tag] of t.detail.tags) tags.push(tag.name);
-		const status = t.status as unknown as V2.TodoStatus;
-		todos.set(id as unknown as V2.TodoId, {
-			id: id as unknown as V2.TodoId,
+		const status = t.status;
+		todos.set(id, {
+			id: id,
 			title: t.detail.title,
 			status,
-			createdAt: t.createdAt as unknown as V2.u64,
+			createdAt: t.createdAt,
 			tags,
 		});
 	}
-	return { todos, settings: new Map<string, string>() } as V2.App;
+	return { todos, settings: new Map<string, string>() };
 }
 
 export function migrateV2ToV1App(app: V2.App): V1.App {
 	const todos: V1.Todo[] = [];
 	for (const [, t] of app.todos) {
 		const done = t.status === V2.TodoStatus.Done;
-		todos.push({ id: Number(t.id) as V1.TodoId, title: t.title, done });
+		todos.push({ id: Number(t.id), title: t.title, done });
 	}
-	return { todos } as V1.App;
+	return { todos };
 }

@@ -1,46 +1,40 @@
-# Rust Workspace
-
-This workspace contains the code generator and runtime for working with BARE schemas and versioned data, plus a runnable example.
+# Rust
 
 ## Crates
 
-- `vbare-gen`: TokenStream code generator that parses `.bare` schemas and emits Rust types deriving `serde` and using `serde_bare` for encoding/decoding.
-- `vbare-compiler`: Build-script helper that processes a directory of schemas, writes one Rust file per schema into `OUT_DIR`, and emits a `combined_imports.rs` module to include from your crate.
-- `vbare`: Runtime traits for versioned data with helpers to serialize/deserialize across versions and with embedded version headers.
-- `examples/basic`: End-to-end example that generates types for three schema versions (v1/v2/v3) and shows migrations between them.
+- `vbare-gen`: Code generator that parses `.bare` schemas and emits Rust types
+- `vbare-compiler`: Build-script helper that processes a directory of schemas
+- `vbare`: Runtime traits for versioned data with helpers to serialize/deserialize across versions
 
-## Quick Start (use in your crate)
+## Quick Start
 
-1) Add dependencies in your `Cargo.toml`:
+**Step 1: Add dependencies in your `Cargo.toml`:**
 
 ```toml
 [dependencies]
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_bare = "0.5"
-vbare = { path = "../vbare" } # adjust path as needed
+vbare = "FILL ME IN"
 
 [build-dependencies]
 anyhow = "1"
-vbare-compiler = { path = "../vbare-compiler" } # or use vbare-gen directly
+vbare-compiler = "FILL ME IN"
 ```
 
-2) In `build.rs`, process your `.bare` schema files directory and generate the modules:
+**Step 2: In `build.rs`, process your `.bare` schema files directory and generate the modules:**
 
 ```rust
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schemas = Path::new("schemas");
-    // Or `process_schemas_with_config(schemas, &vbare_compiler::Config::with_hashable_map())`.
     vbare_compiler::process_schemas(schemas)?;
     Ok(())
 }
 ```
 
-Note: If you prefer to call the generator directly (as in `examples/basic`), use `vbare-gen` from your `build.rs`, parse the returned `TokenStream` with `syn`, and format with `prettyplease`. In that case add `syn` and `prettyplease` to `[build-dependencies]`.
-
-3) In your `lib.rs` or `mod.rs`, include the auto-generated module that re-exports all generated files:
+** Step 3: In your `lib.rs` or `mod.rs`, include the auto-generated module:**
 
 ```rust
 // Bring generated schemas into this crate
@@ -50,7 +44,7 @@ pub mod schemas {
 }
 ```
 
-4) Implement versioning (example with owned data):
+**Step 4: Implement versioning (example with owned data):**
 
 ```rust
 use anyhow::{bail, Result};
@@ -109,28 +103,6 @@ let bytes = MyTypeVersioned::latest(latest).serialize_with_embedded_version(2)?;
 let latest2 = MyTypeVersioned::deserialize_with_embedded_version(&bytes)?;
 ```
 
-## Example
-
-See `rust/examples/basic/` for a full example:
-- `build.rs` normalizes the test fixture schemas and runs codegen (mirrors what `vbare-compiler` does).
-- `src/lib.rs` includes the generated `schemas` module and implements `OwnedVersionedData` for `AppVersioned` with v1→v2→v3 migrations.
-- `tests/migrator.rs` exercises up/down conversions and BARE encoding with `serde_bare`.
-
-Run just the example crate’s tests:
-
-```bash
-cargo test -p basic
-```
-
-## Workspace
-
-Build and test everything:
-
-```bash
-cargo build
-cargo test
-```
-
 ## License
 
-MIT OR Apache-2.0
+MIT

@@ -27,14 +27,7 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.17)
 
-  compiler:
-    dependencies:
-      '@bare-ts/tools':
-        specifier: ^0.16.0
-        version: 0.16.0(@bare-ts/lib@0.4.0)
-      commander:
-        specifier: ^11.1.0
-        version: 11.1.0
+  vbare:
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -43,7 +36,14 @@ importers:
         specifier: ^5.0.0
         version: 5.9.2
 
-  vbare:
+  vbare-compiler:
+    dependencies:
+      '@bare-ts/tools':
+        specifier: ^0.16.0
+        version: 0.16.0(@bare-ts/lib@0.4.0)
+      commander:
+        specifier: ^11.1.0
+        version: 11.1.0
     devDependencies:
       '@types/node':
         specifier: ^20.0.0

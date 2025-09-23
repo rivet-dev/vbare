@@ -1,4 +1,4 @@
-use anyhow::*;
+use anyhow::{Result, bail};
 
 pub trait VersionedData<'a>: Sized {
 	type Latest;

@@ -13,7 +13,7 @@
     }
   },
   "bin": {
-    "bare-compiler": "dist/cli.js"
+    "vbare-compiler": "dist/cli.js"
   },
   "scripts": {
     "build": "tsup",

@@ -1,0 +1,10 @@
+type Todo struct {
+  id: u32
+  title: string
+  done: bool
+}
+
+type App struct {
+  todos: list<Todo>
+}
+

@@ -4,7 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-bare_gen = { path = "../bare-gen" }
+vbare-gen = { path = "../vbare-gen" }
 indoc.workspace = true
 prettyplease.workspace = true
 syn.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

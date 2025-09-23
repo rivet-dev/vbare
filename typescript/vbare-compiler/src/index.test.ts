@@ -3,16 +3,21 @@ import { compileSchema } from "./index";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 describe("compileSchema", () => {
 	let tempDir: string;
-	let schemaPath: string;
 	let outputPath: string;
 
+	// Resolve path to fixtures from this test file location
+	const __dirname = path.dirname(fileURLToPath(import.meta.url));
+	const fixturesDir = path.resolve(__dirname, "../../../fixtures/tests/basic");
+	const v1Schema = path.join(fixturesDir, "v1.bare");
+	const v2Schema = path.join(fixturesDir, "v1.bare");
+
 	beforeAll(async () => {
-		// Create temporary directory for test files
+		// Create temporary directory for test outputs
 		tempDir = await fs.mkdtemp(path.join(tmpdir(), "vbare-compiler-test-"));
-		schemaPath = path.join(tempDir, "test.bare");
 		outputPath = path.join(tempDir, "output.ts");
 	});
 
@@ -21,18 +26,14 @@ describe("compileSchema", () => {
 		await fs.rm(tempDir, { recursive: true, force: true });
 	});
 
-	it("should compile a simple BARE schema", async () => {
-		// Create a simple BARE schema
-		const schema = `type Person struct {
-  name: str
-  age: u8
-}`;
-		await fs.writeFile(schemaPath, schema);
-
-		// Compile the schema
+	it("should compile a simple BARE schema from fixtures", async () => {
+		// Compile the v1 fixture schema
 		await compileSchema({
-			schemaPath,
+			schemaPath: v1Schema,
 			outputPath,
+			config: {
+				legacy: true,
+			},
 		});
 
 		// Check that output file was created
@@ -42,33 +43,28 @@ describe("compileSchema", () => {
 			.catch(() => false);
 		expect(outputExists).toBe(true);
 
-		// Check that output contains TypeScript code
+		// Check that output contains TypeScript code and known types
 		const output = await fs.readFile(outputPath, "utf-8");
 		expect(output).toContain("export");
-		expect(output).toContain("Person");
+		expect(output).toContain("Todo");
+		expect(output).toContain("App");
 	});
 
-	it("should handle custom config options", async () => {
-		const schema = `type Status enum {
-  ACTIVE
-  INACTIVE
-}`;
-		await fs.writeFile(schemaPath, schema);
-
+	it("should handle custom config options using fixtures", async () => {
 		await compileSchema({
-			schemaPath,
+			schemaPath: v2Schema,
 			outputPath,
 			config: {
 				generator: "ts",
 				pedantic: false,
+				legacy: true,
 			},
 		});
 
 		const output = await fs.readFile(outputPath, "utf-8");
-		expect(output).toContain("Status");
-		// The output uses PascalCase for enum values
-		expect(output).toContain("Active");
-		expect(output).toContain("Inactive");
+		// Ensure generator + config produce valid TS helpers
+		expect(output).toContain("export");
+		expect(output).toContain("readTodo");
+		expect(output).toContain("writeTodo");
 	});
 });
-

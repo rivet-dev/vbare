@@ -2,10 +2,6 @@ use std::{fs, path::Path};
 use indoc::formatdoc;
 
 /// Process BARE schema files and generate Rust code.
-///
-/// This function is designed to be called from a build.rs script.
-/// It automatically uses the OUT_DIR environment variable and sets up
-/// cargo:rerun-if-changed for the schema directory.
 pub fn process_schemas(schema_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = std::env::var("OUT_DIR")?;
     let out_path = Path::new(&out_dir);
@@ -30,7 +26,7 @@ pub fn process_schemas(schema_dir: &Path) -> Result<(), Box<dyn std::error::Erro
             .ok_or("No file extension")?
             .0;
 
-        let tokens = bare_gen::bare_schema(&path);
+        let tokens = vbare_gen::bare_schema(&path, vbare_gen::Config { use_hashable_map: true });
         let ast = syn::parse2(tokens)?;
         let content = prettyplease::unparse(&ast);
 

@@ -1,0 +1,26 @@
+// - Introduce TodoId u64; Todo.id: u32 -> TodoId.
+// - Convert Todo.done: bool -> TodoStatus enum { OPEN, IN_PROGRESS, DONE }.
+// - Add created_at: u64 and tags: list<string> to Todo.
+// - Change App.todos: list<Todo> -> map<TodoId, Todo> for fast lookup.
+// - Add App.settings: map<string, string> to demonstrate maps.
+
+type TodoId u64
+
+enum TodoStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+type Todo struct {
+  id: TodoId
+  title: string
+  status: TodoStatus
+  created_at: u64
+  tags: list<string>
+}
+
+type App struct {
+  todos: map<TodoId, Todo>
+  settings: map<string, string>
+}

@@ -1,3 +1,4 @@
 packages:
   - 'vbare-compiler'
   - 'vbare'
+  - 'examples/*'

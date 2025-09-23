@@ -1,0 +1,17 @@
+{
+  "name": "@vbare/example-basic",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Basic example: compile fixtures and migrate between versions",
+  "type": "module",
+  "scripts": {
+    "build": "vbare-compiler ../../../fixtures/tests/basic/",
+    "test": "node ./scripts/build.mjs && vitest run",
+    "test:watch": "node ./scripts/build.mjs && vitest watch"
+  },
+  "dependencies": {
+    "@vbare/compiler": "workspace:*",
+    "@bare-ts/lib": "^0.4.0",
+    "vbare": "workspace:*"
+  }
+}

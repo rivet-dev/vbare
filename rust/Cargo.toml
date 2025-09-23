@@ -1,5 +1,5 @@
 [workspace]
-members = ["bare-gen", "vbare-compiler", "vbare"]
+members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic"]
 resolver = "2"
 
 [workspace.package]

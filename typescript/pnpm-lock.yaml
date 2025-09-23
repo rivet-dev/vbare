@@ -27,6 +27,18 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.17)
 
+  examples/basic:
+    dependencies:
+      '@bare-ts/lib':
+        specifier: ^0.4.0
+        version: 0.4.0
+      '@vbare/compiler':
+        specifier: workspace:*
+        version: link:../../vbare-compiler
+      vbare:
+        specifier: workspace:*
+        version: link:../../vbare
+
   vbare:
     devDependencies:
       '@types/node':

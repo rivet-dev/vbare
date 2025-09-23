@@ -1,0 +1,96 @@
+// - Extract TodoDetail struct; move title and tags into detail field.
+// - Add Priority enum; add priority to Todo.
+// - Convert tags: list<string> -> map<TagId, Tag> (list -> map).
+// - Add assignee as structured data (Assignee struct) replacing implicit absence.
+// - Add history: []Change capturing lifecycle events.
+// - Replace App.settings map<string,string> with structured AppConfig.
+// - Add Boards: map<BoardId, Board> referencing todos by id with columns.
+
+type TodoId u64
+type UserId u64
+type TeamId u64
+type TagId u32
+type BoardId u32
+
+enum TodoStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AssigneeKind {
+  NONE
+  USER
+  TEAM
+}
+
+type Assignee struct {
+  kind: AssigneeKind
+  user_id: optional<UserId>
+  team_id: optional<TeamId>
+}
+
+type Tag struct {
+  id: TagId
+  name: string
+  color: optional<string>
+}
+
+type TodoDetail struct {
+  title: string
+  tags: map<TagId, Tag>
+}
+
+type Change struct {
+  at: u64
+  kind: ChangeKind
+}
+
+enum ChangeKind {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  ASSIGNED
+  TAGGED
+}
+
+type Todo struct {
+  id: TodoId
+  status: TodoStatus
+  created_at: u64
+  priority: Priority
+  assignee: Assignee
+  detail: TodoDetail
+  history: list<Change>
+}
+
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+type AppConfig struct {
+  theme: Theme
+  features: map<string><bool>
+}
+
+type Board struct {
+  id: BoardId
+  name: string
+  // Map of column name -> ordered list of TodoId
+  columns: map<string, list<TodoId>>
+}
+
+type App struct {
+  todos: map<TodoId, Todo>
+  config: AppConfig
+  boards: map<BoardId, Board>
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "baseUrl": ".",
+    "outDir": "./.tsbuild",
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "esnext",
+    "types": ["node"]
+  },
+  "include": ["src", "generated", "scripts", "vitest.config.ts"]
+}
+

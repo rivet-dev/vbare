@@ -179,7 +179,14 @@ async function updateReadmeVersions(version: string): Promise<void> {
       const newline = raw.includes('\r\n') ? '\r\n' : '\n';
 
       // Replace "FILL ME IN" with the actual version
-      const updated = raw.replace(/["']FILL ME IN["']/g, `"${version}"`);
+      let updated = raw.replace(/["']FILL ME IN["']/g, `"${version}"`);
+
+      // Also update existing version strings in dependency examples
+      // Matches patterns like: "vbare": "0.0.1", vbare = "0.0.1", etc.
+      updated = updated.replace(/(["']vbare["']\s*:\s*["'])\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(["'])/g, `$1${version}$3`);
+      updated = updated.replace(/(["']@vbare\/compiler["']\s*:\s*["'])\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(["'])/g, `$1${version}$3`);
+      updated = updated.replace(/(vbare\s*=\s*["'])\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(["'])/g, `$1${version}$3`);
+      updated = updated.replace(/(vbare-compiler\s*=\s*["'])\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(["'])/g, `$1${version}$3`);
 
       if (updated !== raw) {
         await fs.writeFile(readmePath, updated, 'utf8');
@@ -188,6 +195,23 @@ async function updateReadmeVersions(version: string): Promise<void> {
     } catch (error) {
       console.warn(`Skipping ${relative(readmePath)} (file not found or error reading)`);
     }
+  }
+
+  // Update CLI version in typescript/vbare-compiler/src/cli.ts
+  const cliPath = path.join(repoRoot, 'typescript', 'vbare-compiler', 'src', 'cli.ts');
+  try {
+    const raw = await fs.readFile(cliPath, 'utf8');
+    const newline = raw.includes('\r\n') ? '\r\n' : '\n';
+
+    // Update the version in .version("0.0.1") call
+    const updated = raw.replace(/\.version\(["'](\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)["']\)/, `.version("${version}")`);
+
+    if (updated !== raw) {
+      await fs.writeFile(cliPath, updated, 'utf8');
+      console.log(`Updated ${relative(cliPath)} version to ${version}`);
+    }
+  } catch (error) {
+    console.warn(`Skipping ${relative(cliPath)} (file not found or error reading)`);
   }
 }
 

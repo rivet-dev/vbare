@@ -16,11 +16,11 @@
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_bare = "0.5"
-vbare = "0.0.1"
+vbare = "0.0.2"
 
 [build-dependencies]
 anyhow = "1"
-vbare-compiler = "0.0.1"
+vbare-compiler = "0.0.2"
 ```
 
 **Step 2: In `build.rs`, process your `.bare` schema files directory and generate the modules:**

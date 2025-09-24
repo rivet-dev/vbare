@@ -3,7 +3,7 @@ members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic"]
 resolver = "2"
 
 [workspace.package]
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Rivet Gaming, Inc. <developer@rivet.dev>"]
 license = "MIT"

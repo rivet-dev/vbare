@@ -125,6 +125,7 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
   const hadFinalNewline = raw.endsWith('\n') || raw.endsWith('\r\n');
 
   let inPackageSection = false;
+  let inWorkspacePackageSection = false;
   let updated = false;
 
   const updatedLines = lines.map(line => {
@@ -132,10 +133,11 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
 
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       inPackageSection = trimmed === '[package]';
+      inWorkspacePackageSection = trimmed === '[workspace.package]';
       return line;
     }
 
-    if (inPackageSection) {
+    if (inPackageSection || inWorkspacePackageSection) {
       const match = line.match(/^(\s*version\s*=\s*")([^\"]*)(".*)$/);
       if (match) {
         updated = true;
@@ -154,7 +156,7 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
   });
 
   if (!updated) {
-    console.warn(`Skipping ${relative(filePath)} (no [package] version field found)`);
+    console.warn(`Skipping ${relative(filePath)} (no version field found)`);
     return;
   }
 

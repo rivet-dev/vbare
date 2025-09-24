@@ -509,13 +509,17 @@ async function createAndPushCommit(version: string): Promise<void> {
 async function createGitHubRelease(version: string): Promise<void> {
   console.log(`Creating GitHub release for v${version}`);
 
+  const isPrerelease = version.includes('-rc.') || version.includes('-alpha.') || version.includes('-beta.');
+  const releaseArgs = ['release', 'create', `v${version}`, '--title', `v${version}`, '--generate-notes'];
+
+  if (isPrerelease) {
+    releaseArgs.push('--prerelease');
+    console.log('Marking as prerelease (not latest)');
+  }
+
   try {
-    await runCommand(
-      'gh',
-      ['release', 'create', `v${version}`, '--title', `v${version}`, '--generate-notes'],
-      repoRoot
-    );
-    console.log(`GitHub release v${version} created successfully`);
+    await runCommand('gh', releaseArgs, repoRoot);
+    console.log(`GitHub release v${version} created successfully${isPrerelease ? ' (prerelease)' : ''}`);
   } catch (error) {
     console.error(`Failed to create GitHub release: ${error}`);
     throw error;

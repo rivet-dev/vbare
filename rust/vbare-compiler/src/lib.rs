@@ -80,12 +80,15 @@ pub fn process_schemas_with_config(
     mod_content.push_str("// Auto-generated module file for schemas\n\n");
 
     for name in all_names {
+        let module_name = name.replace('.', "_");
         mod_content.push_str(&formatdoc!(
             r#"
-            pub mod {name} {{
+            pub mod {module_name} {{
                 include!(concat!(env!("OUT_DIR"), "/{name}_generated.rs"));
             }}
             "#,
+            name = name,
+            module_name = module_name,
         ));
     }
 

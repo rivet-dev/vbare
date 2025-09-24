@@ -476,6 +476,24 @@ async function createAndPushCommit(version: string): Promise<void> {
   await runCommand('git', ['add', '--all'], repoRoot);
   await runCommand('git', ['commit', '-m', `chore: release ${version}`], repoRoot);
   await runCommand('git', ['push'], repoRoot);
+
+  await createGitHubRelease(version);
+}
+
+async function createGitHubRelease(version: string): Promise<void> {
+  console.log(`Creating GitHub release for v${version}`);
+
+  try {
+    await runCommand(
+      'gh',
+      ['release', 'create', `v${version}`, '--title', `v${version}`, '--generate-notes'],
+      repoRoot
+    );
+    console.log(`GitHub release v${version} created successfully`);
+  } catch (error) {
+    console.error(`Failed to create GitHub release: ${error}`);
+    throw error;
+  }
 }
 
 async function hasPendingChanges(): Promise<boolean> {

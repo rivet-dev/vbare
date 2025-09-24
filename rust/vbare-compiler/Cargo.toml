@@ -7,7 +7,7 @@ license.workspace = true
 description = "Compile-time code generation for VBARE (Versioned Binary Application Record Encoding), an extension to BARE with versioned schema evolution"
 
 [dependencies]
-vbare-gen = { path = "../vbare-gen", version = "0.0.1" }
+vbare-gen = { path = "../vbare-gen", version = "0.0.2" }
 indoc.workspace = true
 prettyplease.workspace = true
 syn.workspace = true

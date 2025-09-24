@@ -1,6 +1,6 @@
 {
   "name": "@vbare/compiler",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Bare minimum script to compile a bare schema",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

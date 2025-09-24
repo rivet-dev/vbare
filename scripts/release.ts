@@ -46,6 +46,8 @@ async function main(): Promise<void> {
 
   await publishTypeScriptPackages(publishableTypeScriptPackages, version);
   await publishRustPackages(publishableRustPackages, version);
+
+  await createGitHubRelease(version);
 }
 
 function isValidVersion(version: string): boolean {
@@ -127,6 +129,7 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
   let inPackageSection = false;
   let inWorkspacePackageSection = false;
   let updated = false;
+  let hasWorkspaceVersion = false;
 
   const updatedLines = lines.map(line => {
     const trimmed = line.trim();
@@ -137,7 +140,13 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
       return line;
     }
 
-    if (inPackageSection || inWorkspacePackageSection) {
+    // Check for version.workspace = true (skip these files)
+    if (inPackageSection && trimmed === 'version.workspace = true') {
+      hasWorkspaceVersion = true;
+      return line;
+    }
+
+    if ((inPackageSection || inWorkspacePackageSection) && !hasWorkspaceVersion) {
       const match = line.match(/^(\s*version\s*=\s*")([^\"]*)(".*)$/);
       if (match) {
         updated = true;
@@ -154,6 +163,12 @@ async function updateCargoToml(filePath: string, version: string): Promise<void>
 
     return line;
   });
+
+  // For workspace members, we don't update the version but might still update dependencies
+  if (hasWorkspaceVersion && !updated) {
+    console.log(`${relative(filePath)} uses workspace version`);
+    return;
+  }
 
   if (!updated) {
     console.warn(`Skipping ${relative(filePath)} (no version field found)`);
@@ -502,12 +517,19 @@ async function createAndPushCommit(version: string): Promise<void> {
   await runCommand('git', ['add', '--all'], repoRoot);
   await runCommand('git', ['commit', '-m', `chore: release ${version}`], repoRoot);
   await runCommand('git', ['push'], repoRoot);
-
-  await createGitHubRelease(version);
 }
 
 async function createGitHubRelease(version: string): Promise<void> {
   console.log(`Creating GitHub release for v${version}`);
+
+  // Check if release already exists
+  try {
+    await captureCommand('gh', ['release', 'view', `v${version}`], repoRoot);
+    console.log(`GitHub release v${version} already exists, skipping`);
+    return;
+  } catch {
+    // Release doesn't exist, proceed with creation
+  }
 
   const isPrerelease = version.includes('-rc.') || version.includes('-alpha.') || version.includes('-beta.');
   const releaseArgs = ['release', 'create', `v${version}`, '--title', `v${version}`, '--generate-notes'];

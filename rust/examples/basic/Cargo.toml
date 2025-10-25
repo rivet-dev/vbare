@@ -1,6 +1,6 @@
 [package]
 name = "basic"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 description = "Basic example for VBARE (Versioned Binary Application Record Encoding), an extension to BARE with versioned schema evolution"
 license = "MIT"

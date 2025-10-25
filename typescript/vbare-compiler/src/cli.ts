@@ -10,7 +10,7 @@ const program = new Command();
 program
 	.name("vbare-compiler")
 	.description("Compile BARE schemas (single file or an entire folder) to TypeScript")
-	.version("0.0.2");
+	.version("0.0.3");
 
 async function isDirectory(p: string): Promise<boolean> {
   try {

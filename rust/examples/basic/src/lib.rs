@@ -19,11 +19,11 @@ pub enum AppVersioned {
 impl vbare::OwnedVersionedData for AppVersioned {
     type Latest = schemas::v3::App;
 
-    fn latest(latest: Self::Latest) -> Self {
+    fn wrap_latest(latest: Self::Latest) -> Self {
         AppVersioned::V3(latest)
     }
 
-    fn into_latest(self) -> Result<Self::Latest> {
+    fn unwrap_latest(self) -> Result<Self::Latest> {
         match self {
             AppVersioned::V3(app) => Ok(app),
             _ => bail!("version not latest"),

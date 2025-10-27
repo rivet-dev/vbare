@@ -3,8 +3,8 @@ use anyhow::{bail, Result};
 pub trait VersionedData<'a>: Sized {
     type Latest;
 
-    fn latest(latest: Self::Latest) -> Self;
-    fn into_latest(self) -> Result<Self::Latest>;
+    fn wrap_latest(latest: Self::Latest) -> Self;
+    fn unwrap_latest(self) -> Result<Self::Latest>;
     fn deserialize_version(payload: &'a [u8], version: u16) -> Result<Self>;
     fn serialize_version(self, version: u16) -> Result<Vec<u8>>;
 
@@ -36,7 +36,7 @@ pub trait VersionedData<'a>: Sized {
             data = converter(data)?;
         }
 
-        data.into_latest()
+        data.unwrap_latest()
     }
 
     fn serialize(self, version: u16) -> Result<Vec<u8>> {
@@ -77,8 +77,8 @@ pub trait VersionedData<'a>: Sized {
 pub trait OwnedVersionedData: Sized {
     type Latest;
 
-    fn latest(latest: Self::Latest) -> Self;
-    fn into_latest(self) -> Result<Self::Latest>;
+    fn wrap_latest(latest: Self::Latest) -> Self;
+    fn unwrap_latest(self) -> Result<Self::Latest>;
     fn deserialize_version(payload: &[u8], version: u16) -> Result<Self>;
     fn serialize_version(self, version: u16) -> Result<Vec<u8>>;
 
@@ -110,7 +110,7 @@ pub trait OwnedVersionedData: Sized {
             data = converter(data)?;
         }
 
-        data.into_latest()
+        data.unwrap_latest()
     }
 
     fn serialize(self, version: u16) -> Result<Vec<u8>> {

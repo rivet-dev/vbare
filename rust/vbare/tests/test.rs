@@ -24,11 +24,11 @@ enum TestData {
 impl OwnedVersionedData for TestData {
     type Latest = TestDataV2;
 
-    fn latest(latest: TestDataV2) -> Self {
+    fn wrap_latest(latest: TestDataV2) -> Self {
         TestData::V2(latest)
     }
 
-    fn into_latest(self) -> Result<Self::Latest> {
+    fn unwrap_latest(self) -> Result<Self::Latest> {
         #[allow(irrefutable_let_patterns)]
         if let TestData::V2(data) = self {
             Ok(data)
@@ -75,11 +75,11 @@ enum TestDataNoConverters {
 impl OwnedVersionedData for TestDataNoConverters {
     type Latest = TestDataNoConvertersV1;
 
-    fn latest(latest: TestDataNoConvertersV1) -> Self {
+    fn wrap_latest(latest: TestDataNoConvertersV1) -> Self {
         TestDataNoConverters::V1(latest)
     }
 
-    fn into_latest(self) -> Result<Self::Latest> {
+    fn unwrap_latest(self) -> Result<Self::Latest> {
         #[allow(irrefutable_let_patterns)]
         if let TestDataNoConverters::V1(data) = self {
             Ok(data)

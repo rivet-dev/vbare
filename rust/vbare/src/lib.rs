@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 pub trait VersionedData<'a>: Sized {
     type Latest;
@@ -29,9 +29,12 @@ pub trait VersionedData<'a>: Sized {
     fn deserialize(payload: &'a [u8], version: u16) -> Result<Self::Latest> {
         let mut data = Self::deserialize_version(payload, version)?;
 
+        let skip_count = version
+            .checked_sub(1)
+            .with_context(|| format!("proto version ({version}) must be > 0"))?;
         for converter in Self::deserialize_converters()
             .iter()
-            .skip(version.saturating_sub(1) as usize)
+            .skip(skip_count as usize)
         {
             data = converter(data)?;
         }
@@ -42,10 +45,16 @@ pub trait VersionedData<'a>: Sized {
     fn serialize(self, version: u16) -> Result<Vec<u8>> {
         let mut data = self;
 
-        for converter in Self::serialize_converters()
-            .iter()
-            .skip(version.saturating_sub(1) as usize)
-        {
+        let converters = Self::serialize_converters();
+        let take_count = (converters.len() + 1)
+            .checked_sub(version as usize)
+            .with_context(|| {
+                format!(
+                    "proto version ({version}) greater than latest version ({})",
+                    converters.len() + 1
+                )
+            })?;
+        for converter in converters.iter().take(take_count) {
             data = converter(data)?;
         }
 
@@ -103,9 +112,12 @@ pub trait OwnedVersionedData: Sized {
     fn deserialize(payload: &[u8], version: u16) -> Result<Self::Latest> {
         let mut data = Self::deserialize_version(payload, version)?;
 
+        let skip_count = version
+            .checked_sub(1)
+            .with_context(|| format!("proto version ({version}) must be > 0"))?;
         for converter in Self::deserialize_converters()
             .iter()
-            .skip(version.saturating_sub(1) as usize)
+            .skip(skip_count as usize)
         {
             data = converter(data)?;
         }
@@ -116,10 +128,16 @@ pub trait OwnedVersionedData: Sized {
     fn serialize(self, version: u16) -> Result<Vec<u8>> {
         let mut data = self;
 
-        for converter in Self::serialize_converters()
-            .iter()
-            .skip(version.saturating_sub(1) as usize)
-        {
+        let converters = Self::serialize_converters();
+        let take_count = (converters.len() + 1)
+            .checked_sub(version as usize)
+            .with_context(|| {
+                format!(
+                    "proto version ({version}) greater than latest version ({})",
+                    converters.len() + 1
+                )
+            })?;
+        for converter in converters.iter().take(take_count) {
             data = converter(data)?;
         }
 

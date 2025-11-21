@@ -60,8 +60,8 @@ pub enum MyTypeVersioned {
 impl OwnedVersionedData for MyTypeVersioned {
     type Latest = schemas::v2::MyType;
 
-    fn latest(latest: Self::Latest) -> Self { Self::V2(latest) }
-    fn into_latest(self) -> Result<Self::Latest> {
+    fn wrap_latest(latest: Self::Latest) -> Self { Self::V2(latest) }
+    fn unwrap_latest(self) -> Result<Self::Latest> {
         match self { Self::V2(x) => Ok(x), _ => bail!("not latest") }
     }
 

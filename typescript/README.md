@@ -14,10 +14,10 @@
 ```json
 {
   "dependencies": {
-    "vbare": "0.0.3"
+    "vbare": "0.0.4"
   },
   "devDependencies": {
-    "@vbare/compiler": "0.0.3"
+    "@vbare/compiler": "0.0.4"
   }
 }
 ```

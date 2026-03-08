@@ -142,14 +142,15 @@ function postProcessGeneratedTs(
 	}
 
 	if (schemaVersion !== null) {
-		const defaultConfigLine = 'const DEFAULT_CONFIG = /* @__PURE__ */ bare.Config({})\n';
-		if (!code.includes(defaultConfigLine)) {
-			throw new Error("Failed to find DEFAULT_CONFIG while injecting SCHEMA_VERSION");
+		const configPattern =
+			/(const\s+\w+\s*=\s*\/\* @__PURE__ \*\/ bare\.Config\(\{\}\)\n)/;
+		if (!configPattern.test(code)) {
+			throw new Error("Failed to find bare.Config while injecting SCHEMA_VERSION");
 		}
 
 		code = code.replace(
-			defaultConfigLine,
-			`${defaultConfigLine}\nexport const SCHEMA_VERSION = ${schemaVersion} as const\n`,
+			configPattern,
+			`$1\nexport const SCHEMA_VERSION = ${schemaVersion} as const\n`,
 		);
 	}
 

@@ -13,23 +13,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            vbare: vbare_gen::Config::with_hash_map(),
-        }
-    }
-}
-
-impl Config {
-    /// Convenience helper to enable hashable maps in generated code.
-    pub fn with_hashable_map() -> Self {
-        Self {
-            vbare: vbare_gen::Config::with_hashable_map(),
-        }
-    }
-
-    /// Convenience helper to use the standard library `HashMap`.
-    pub fn with_hash_map() -> Self {
-        Self {
-            vbare: vbare_gen::Config::with_hash_map(),
+            vbare: vbare_gen::Config::default(),
         }
     }
 }

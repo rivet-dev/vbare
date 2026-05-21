@@ -31,7 +31,7 @@ pub trait VersionedData<'a>: Sized {
 
         let skip_count = version
             .checked_sub(1)
-            .with_context(|| format!("proto version ({version}) must be > 0"))?;
+            .with_context(|| format!("protocol version ({version}) must be > 0"))?;
         for converter in Self::deserialize_converters()
             .iter()
             .skip(skip_count as usize)
@@ -50,7 +50,7 @@ pub trait VersionedData<'a>: Sized {
             .checked_sub(version as usize)
             .with_context(|| {
                 format!(
-                    "proto version ({version}) greater than latest version ({})",
+                    "protocol version ({version}) greater than latest version ({})",
                     converters.len() + 1
                 )
             })?;
@@ -114,7 +114,7 @@ pub trait OwnedVersionedData: Sized {
 
         let skip_count = version
             .checked_sub(1)
-            .with_context(|| format!("proto version ({version}) must be > 0"))?;
+            .with_context(|| format!("protocol version ({version}) must be > 0"))?;
         for converter in Self::deserialize_converters()
             .iter()
             .skip(skip_count as usize)
@@ -133,7 +133,7 @@ pub trait OwnedVersionedData: Sized {
             .checked_sub(version as usize)
             .with_context(|| {
                 format!(
-                    "proto version ({version}) greater than latest version ({})",
+                    "protocol version ({version}) greater than latest version ({})",
                     converters.len() + 1
                 )
             })?;

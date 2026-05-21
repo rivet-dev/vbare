@@ -71,9 +71,7 @@ as cleanly or require additional explanation.
 
 ## Maps
 
-BARE maps are interpreted as `std::collections::HashMap<K, V>` in Rust by default. Set
-`Config::use_hashable_map` to `true` to emit `rivet_util::serde::HashableMap<K, V>` instead.
-
+BARE maps are interpreted as `std::collections::HashMap<K, V>` in Rust by default.
 ## Variable Length Integers
 
 The variable `uint` and `int` types are mapped to [`serde_bare::UInt`] and [`serde_bare::Int`]
@@ -96,35 +94,47 @@ mod parser;
 
 /// Configuration for `bare_schema` code generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Config {
-    /// When true, generated maps use `rivet_util::serde::HashableMap`.
-    pub use_hashable_map: bool,
-}
+pub struct Config {}
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            use_hashable_map: false,
-        }
-    }
-}
-
-impl Config {
-    /// Convenience constructor to emit `HashMap` rather than `HashableMap`.
-    pub fn with_hash_map() -> Self {
-        Self::default()
-    }
-
-    /// Convenience constructor to emit `HashableMap`.
-    pub fn with_hashable_map() -> Self {
-        Self {
-            use_hashable_map: true,
-        }
+        Self {}
     }
 }
 
 fn ident_from_string(s: &String) -> Ident {
     Ident::new(s, Span::call_site())
+}
+
+#[derive(Clone, Copy)]
+struct Caps {
+    eq: bool,
+    hash: bool,
+}
+
+impl Caps {
+    const ALL: Caps = Caps {
+        eq: true,
+        hash: true,
+    };
+    const NONE: Caps = Caps {
+        eq: false,
+        hash: false,
+    };
+    fn and(self, other: Caps) -> Caps {
+        Caps {
+            eq: self.eq && other.eq,
+            hash: self.hash && other.hash,
+        }
+    }
+    fn derive_tokens(self) -> TokenStream {
+        match (self.eq, self.hash) {
+            (true, true) => quote! { , Eq, Hash },
+            (true, false) => quote! { , Eq },
+            (false, true) => quote! { , Hash },
+            (false, false) => quote! {},
+        }
+    }
 }
 
 /// `bare_schema` parses a BARE schema file and generates equivalent Rust code that is capable of
@@ -133,12 +143,11 @@ fn ident_from_string(s: &String) -> Ident {
 /// path is treated as relative to the file location of the macro's use.
 /// For details on how the BARE data model maps to the Rust data model, see the [`Serialize`
 /// derive macro's documentation.](https://docs.rs/serde_bare/latest/serde_bare/)
-pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStream {
+pub fn bare_schema(schema_path: &Path, _config: Config) -> proc_macro2::TokenStream {
     let file = read_to_string(schema_path).unwrap();
     let mut schema_generator = SchemaGenerator {
         global_output: Default::default(),
         user_type_registry: parse_string(&file),
-        config,
     };
 
     for (name, user_type) in &schema_generator.user_type_registry.clone() {
@@ -151,7 +160,6 @@ pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStre
 struct SchemaGenerator {
     global_output: Vec<TokenStream>,
     user_type_registry: BTreeMap<String, AnyType>,
-    config: Config,
 }
 
 impl SchemaGenerator {
@@ -227,6 +235,34 @@ impl SchemaGenerator {
         self.global_output.push(def);
     }
 
+    fn caps_of(&self, t: &AnyType) -> Caps {
+        match t {
+            AnyType::Primative(p) => match p {
+                PrimativeType::F32 | PrimativeType::F64 => Caps::NONE,
+                _ => Caps::ALL,
+            },
+            AnyType::List { inner, .. } => self.caps_of(inner),
+            AnyType::Optional(inner) => self.caps_of(inner),
+            AnyType::Map { key, value } => Caps {
+                eq: self.caps_of(key).eq && self.caps_of(value).eq,
+                hash: false,
+            },
+            AnyType::Struct(fields) => fields
+                .iter()
+                .map(|f| self.caps_of(&f.type_r))
+                .fold(Caps::ALL, Caps::and),
+            AnyType::Union(members) => members
+                .iter()
+                .map(|m| self.caps_of(m))
+                .fold(Caps::ALL, Caps::and),
+            AnyType::Enum(_) => Caps::ALL,
+            AnyType::TypeReference(name) => match self.user_type_registry.get(name) {
+                Some(t) => self.caps_of(t),
+                None => Caps::ALL,
+            },
+        }
+    }
+
     fn dispatch_type(&mut self, name: &String, any_type: &AnyType) -> TokenStream {
         match any_type {
             AnyType::Primative(p) => gen_primative_type_def(p),
@@ -246,14 +282,8 @@ impl SchemaGenerator {
     fn gen_map(&mut self, name: &String, key: &AnyType, value: &AnyType) -> TokenStream {
         let key_def = self.dispatch_type(name, key);
         let val_def = self.dispatch_type(name, value);
-        if self.config.use_hashable_map {
-            quote! {
-                rivet_util::serde::HashableMap<#key_def, #val_def>
-            }
-        } else {
-            quote! {
-                std::collections::HashMap<#key_def, #val_def>
-            }
+        quote! {
+            std::collections::HashMap<#key_def, #val_def>
         }
     }
 
@@ -275,17 +305,17 @@ impl SchemaGenerator {
     }
 
     fn gen_struct(&mut self, name: &String, fields: &Vec<StructField>) -> TokenStream {
+        let extra = fields
+            .iter()
+            .map(|f| self.caps_of(&f.type_r))
+            .fold(Caps::ALL, Caps::and)
+            .derive_tokens();
         // clone so we can safely drain this
         let fields_clone = fields.clone();
         let fields_gen = self.gen_struct_field(name, fields_clone);
-        let hash_derive = if self.config.use_hashable_map {
-            quote! { , Hash }
-        } else {
-            TokenStream::new()
-        };
         self.gen_anonymous(name, |ident| {
             quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
+                #[derive(Serialize, Deserialize, PartialEq, Debug, Clone #extra)]
                 pub struct #ident {
                     #(#fields_gen),*
                 }
@@ -336,14 +366,14 @@ impl SchemaGenerator {
             };
             members_def.push(member_def);
         }
-        let hash_derive = if self.config.use_hashable_map {
-            quote! { , Hash }
-        } else {
-            TokenStream::new()
-        };
+        let extra = members
+            .iter()
+            .map(|m| self.caps_of(m))
+            .fold(Caps::ALL, Caps::and)
+            .derive_tokens();
         self.gen_anonymous(name, |ident| {
             quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone #hash_derive)]
+                #[derive(Serialize, Deserialize, PartialEq, Debug, Clone #extra)]
                 pub enum #ident {
                     #(#members_def),*
                 }
@@ -389,20 +419,15 @@ impl SchemaGenerator {
                 }
             }
         });
-        let hash_derive = if self.config.use_hashable_map {
-            quote! { Hash, }
-        } else {
-            TokenStream::new()
-        };
         self.gen_anonymous(name, |ident| {
-			quote! {
-				#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, PartialOrd, Ord, #hash_derive Clone)]
-				#[repr(usize)]
-				pub enum #ident {
-					#(#member_defs),*
-				}
-			}
-		})
+            quote! {
+                #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Debug, PartialOrd, Clone)]
+                #[repr(usize)]
+                pub enum #ident {
+                    #(#member_defs),*
+                }
+            }
+        })
     }
 
     /// `gen_anonymous` generates an identifier from the provided `name`, passed it to `inner`, pushes

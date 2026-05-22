@@ -10,7 +10,7 @@ struct BARE;
 pub type Length = usize;
 
 #[derive(Debug, Clone, Copy)]
-pub enum PrimativeType {
+pub enum PrimitiveType {
     UInt,
     U64,
     U32,
@@ -31,7 +31,7 @@ pub enum PrimativeType {
 
 #[derive(Debug, Clone)]
 pub enum AnyType {
-    Primative(PrimativeType),
+    Primitive(PrimitiveType),
     List {
         inner: Box<AnyType>,
         length: Option<usize>,
@@ -82,17 +82,17 @@ fn parse_any_type(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) ->
     match pair.as_rule() {
         Rule::unsigned_t => parse_unsigned_int(pair),
         Rule::signed_t => parse_signed_int(pair),
-        Rule::void_t => AnyType::Primative(PrimativeType::Void),
-        Rule::str_t => AnyType::Primative(PrimativeType::Str),
-        Rule::bool_t => AnyType::Primative(PrimativeType::Bool),
+        Rule::void_t => AnyType::Primitive(PrimitiveType::Void),
+        Rule::str_t => AnyType::Primitive(PrimitiveType::Str),
+        Rule::bool_t => AnyType::Primitive(PrimitiveType::Bool),
         Rule::float_t => parse_float(pair),
         Rule::data_t => {
             let length_t = pair.into_inner().next();
             if let Some(length_t) = length_t {
                 let length: usize = length_t.as_str().parse().unwrap();
-                AnyType::Primative(PrimativeType::Data(Some(length)))
+                AnyType::Primitive(PrimitiveType::Data(Some(length)))
             } else {
-                AnyType::Primative(PrimativeType::Data(None))
+                AnyType::Primitive(PrimitiveType::Data(None))
             }
         }
         Rule::enum_t => parse_enum(pair),
@@ -118,24 +118,24 @@ fn parse_any_type(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) ->
 
 fn parse_unsigned_int(pair: Pair<'_, Rule>) -> AnyType {
     assert!(pair.as_rule() == Rule::unsigned_t);
-    AnyType::Primative(match pair.as_str() {
-        "uint" => PrimativeType::UInt,
-        "u64" => PrimativeType::U64,
-        "u32" => PrimativeType::U32,
-        "u16" => PrimativeType::U16,
-        "u8" => PrimativeType::U8,
+    AnyType::Primitive(match pair.as_str() {
+        "uint" => PrimitiveType::UInt,
+        "u64" => PrimitiveType::U64,
+        "u32" => PrimitiveType::U32,
+        "u16" => PrimitiveType::U16,
+        "u8" => PrimitiveType::U8,
         _ => unreachable!(),
     })
 }
 
 fn parse_signed_int(pair: Pair<'_, Rule>) -> AnyType {
     assert!(pair.as_rule() == Rule::signed_t);
-    AnyType::Primative(match pair.as_str() {
-        "int" => PrimativeType::Int,
-        "i64" => PrimativeType::I64,
-        "i32" => PrimativeType::I32,
-        "i16" => PrimativeType::I16,
-        "i8" => PrimativeType::I8,
+    AnyType::Primitive(match pair.as_str() {
+        "int" => PrimitiveType::Int,
+        "i64" => PrimitiveType::I64,
+        "i32" => PrimitiveType::I32,
+        "i16" => PrimitiveType::I16,
+        "i8" => PrimitiveType::I8,
         _ => unreachable!(),
     })
 }
@@ -203,9 +203,9 @@ fn parse_union(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> An
 
 fn parse_float(pair: Pair<'_, Rule>) -> AnyType {
     assert!(pair.as_rule() == Rule::float_t);
-    AnyType::Primative(match pair.as_str() {
-        "f32" => PrimativeType::F32,
-        "f64" => PrimativeType::F64,
+    AnyType::Primitive(match pair.as_str() {
+        "f32" => PrimitiveType::F32,
+        "f64" => PrimitiveType::F64,
         _ => unreachable!(),
     })
 }

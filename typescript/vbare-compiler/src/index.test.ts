@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { compileSchema } from "./index";
+import { compileSchema, compileSchemaDirectory } from "./index";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -48,6 +48,7 @@ describe("compileSchema", () => {
 		expect(output).toContain("export");
 		expect(output).toContain("Todo");
 		expect(output).toContain("App");
+		expect(output).toContain("export const SCHEMA_VERSION = 1 as const");
 	});
 
 	it("should handle custom config options using fixtures", async () => {
@@ -66,5 +67,36 @@ describe("compileSchema", () => {
 		expect(output).toContain("export");
 		expect(output).toContain("readTodo");
 		expect(output).toContain("writeTodo");
+	});
+
+	it("should rewrite the runtime import when requested", async () => {
+		await compileSchema({
+			schemaPath: v1Schema,
+			outputPath,
+			config: {
+				legacy: true,
+			},
+			runtimeImportPath: "@rivetkit/bare-ts",
+		});
+
+		const output = await fs.readFile(outputPath, "utf-8");
+		expect(output).toContain('@rivetkit/bare-ts');
+		expect(output).not.toContain('@bare-ts/lib');
+	});
+
+	it("should generate latest.ts for folder compiles", async () => {
+		const outDir = path.join(tempDir, "folder-out");
+
+		await compileSchemaDirectory({
+			inputDir: fixturesDir,
+			outputDir: outDir,
+			config: {
+				legacy: true,
+			},
+		});
+
+		const latest = await fs.readFile(path.join(outDir, "latest.ts"), "utf-8");
+		expect(latest).toContain('export * from "./v3"');
+		expect(latest).toContain("export const CURRENT_VERSION = 3 as const");
 	});
 });

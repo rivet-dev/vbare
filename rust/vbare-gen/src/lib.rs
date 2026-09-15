@@ -396,9 +396,15 @@ impl SchemaGenerator {
                     }
                 }
                 _ => {
+                    let bytes_attr = if self.is_bytes_type(member) {
+                        quote! { #[serde(with = "serde_bytes")] }
+                    } else {
+                        quote! {}
+                    };
                     let inner_def = self.dispatch_type(&format!("{name}Member{i}"), member);
                     // The `inner_def` is always a top-level type here
                     quote! {
+                        #bytes_attr
                         #inner_def(#inner_def)
                     }
                 }

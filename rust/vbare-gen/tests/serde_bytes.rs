@@ -13,14 +13,13 @@ type Blob data
 type SmallKey data[16]
 type BigKey data[64]
 
-type SqlNull void
-type SqlText str
-type SqlBlob data
+type Empty void
+type Label str
 
-type SqlValue union {
-  SqlNull |
-  SqlText |
-  SqlBlob
+type Value union {
+  Empty |
+  Label |
+  Blob
 }
 
 type Message struct {
@@ -31,7 +30,7 @@ type Message struct {
   big: BigKey
   chunks: list<data>
   name: str
-  value: SqlValue
+  value: Value
 }
 "#;
 
@@ -92,12 +91,12 @@ fn annotates_union_variants_carrying_data() {
 
     // A union member that resolves to `data` becomes a newtype variant holding `Vec<u8>`.
     assert!(
-        generated.contains("#[serde(with=\"serde_bytes\")]SqlBlob(SqlBlob)"),
-        "expected the SqlBlob variant to be annotated, got: {generated}"
+        generated.contains("#[serde(with=\"serde_bytes\")]Blob(Blob)"),
+        "expected the Blob variant to be annotated, got: {generated}"
     );
     assert!(
-        !generated.contains("#[serde(with=\"serde_bytes\")]SqlText(SqlText)"),
-        "expected the SqlText variant to be left unannotated, got: {generated}"
+        !generated.contains("#[serde(with=\"serde_bytes\")]Label(Label)"),
+        "expected the Label variant to be left unannotated, got: {generated}"
     );
 }
 
@@ -117,5 +116,5 @@ fn keeps_underlying_field_types() {
         "got: {generated}"
     );
     assert!(generated.contains("pubtypeBigKey=Vec<u8>"), "got: {generated}");
-    assert!(generated.contains("pubtypeSqlBlob=Vec<u8>"), "got: {generated}");
+    assert!(generated.contains("pubtypeBlob=Vec<u8>"), "got: {generated}");
 }

@@ -51,8 +51,8 @@ importers:
   vbare-compiler:
     dependencies:
       '@bare-ts/tools':
-        specifier: ^0.16.0
-        version: 0.16.0(@bare-ts/lib@0.4.0)
+        specifier: ^0.13.0
+        version: 0.13.0(@bare-ts/lib@0.3.0)
       commander:
         specifier: ^11.1.0
         version: 11.1.0
@@ -100,19 +100,25 @@ packages:
       '@babel/helper-validator-identifier': 7.27.1
     dev: true
 
+  /@bare-ts/lib@0.3.0:
+    resolution: {integrity: sha512-0JlIu0R26CTMdEnmmKIuFvAS9Cd554MvH4BjI6iL+74TDYBCHhaCWIDJXU6+VuYPu0+/JDLV/KXQstK9Sxn+9A==}
+    engines: {node: '>= 12'}
+    dev: false
+
   /@bare-ts/lib@0.4.0:
     resolution: {integrity: sha512-uTb12lcDkvwwwGb/4atNy/+2Xuksx88tlxKuwnDuxmsOFVo4R/WsE+fmAf2nWtzHDi7m6NDw8Ke9j+XlNBLoJg==}
     engines: {node: ^14.18.0 || >=16.0.0}
     dev: false
 
-  /@bare-ts/tools@0.16.0(@bare-ts/lib@0.4.0):
-    resolution: {integrity: sha512-oBZ/GrrfNnsmm0x7/tn9r88MH3fH640cGG7TwgFyuFF/Cu1EgafwcJtXotNTOKAhcM4mH94QTbexQY+mvyTDGA==}
-    engines: {node: '>=20.0.0'}
+  /@bare-ts/tools@0.13.0(@bare-ts/lib@0.3.0):
+    resolution: {integrity: sha512-53fjq3/B3HeFJG6FygJbbdAoqvVnexdWjoi2O95p4karcyXUzest+AJ4ruf9ppk4bl28Jn0jkVegsJgeNZt4OQ==}
+    engines: {node: ^14.18.0 || >=16.0.0}
     hasBin: true
     peerDependencies:
-      '@bare-ts/lib': '>=0.3.0 <=0.4.0'
+      '@bare-ts/lib': ~0.3.0
     dependencies:
-      '@bare-ts/lib': 0.4.0
+      '@bare-ts/lib': 0.3.0
+      commander: 10.0.0
     dev: false
 
   /@bcoe/v8-coverage@1.0.2:
@@ -790,6 +796,11 @@ packages:
   /color-name@1.1.4:
     resolution: {integrity: sha512-dOy+3AuW3a2wNbZHIuMZpTcgjGuLU/uBL/ubcZF9OXbDo8ff4O8yVp5Bf0efS8uEoYo5q4Fx7dY9OgQGXgAsQA==}
     dev: true
+
+  /commander@10.0.0:
+    resolution: {integrity: sha512-zS5PnTI22FIRM6ylNW8G4Ap0IEOyk62fhLSD0+uHRT9McRCLGpkVNvao4bjimpK/GShynyQkFFxHhwMcETmduA==}
+    engines: {node: '>=14'}
+    dev: false
 
   /commander@11.1.0:
     resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}

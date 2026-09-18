@@ -26,7 +26,7 @@
     "prepublishOnly": "pnpm build"
   },
   "dependencies": {
-    "@bare-ts/tools": "^0.16.0",
+    "@bare-ts/tools": "^0.13.0",
     "commander": "^11.1.0"
   },
   "devDependencies": {

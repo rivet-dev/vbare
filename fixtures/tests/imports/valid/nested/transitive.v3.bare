@@ -1,0 +1,10 @@
+#import "shared/middle.v2.bare"
+type Choice union { SharedKey | Fraction | Empty | Payload }
+type Message struct {
+  middle: Middle
+  key: optional<SharedKey>
+  keys: list<SharedKey>
+  fraction: Fraction
+  payload: Payload
+  choice: Choice
+}

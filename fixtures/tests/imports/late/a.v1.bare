@@ -1,0 +1,2 @@
+type A u64
+#import "b.v1.bare"

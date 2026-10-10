@@ -1,0 +1,2 @@
+#import "../valid/simple.v1.bare"
+type A u64

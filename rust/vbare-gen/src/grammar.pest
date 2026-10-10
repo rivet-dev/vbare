@@ -1,5 +1,6 @@
-//schema            =  { SOI ~ user_type+ ~ EOI }
-schema            =  { SOI ~ user_type+ ~ EOI }
+schema            =  { SOI ~ import* ~ user_type+ ~ EOI }
+import            = ${ "#import" ~ (" " | "\t")+ ~ "\"" ~ import_path ~ "\"" ~ (" " | "\t")* ~ (NEWLINE | EOI) }
+import_path       = @{ (! ("\"" | NEWLINE) ~ ANY)+ }
 type_l            = _{ "type" }
 user_type         =  { "type" ~ user_type_name ~ any_type }
 user_type_name    = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
@@ -43,4 +44,4 @@ any_type          = _{
   | primative_type
 }
 WHITESPACE        = _{ " " | "\n" | "\t" | NEWLINE }
-COMMENT           = _{ "#" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
+COMMENT           = _{ !("#import" ~ (" " | "\t" | "\"" | NEWLINE | EOI)) ~ "#" ~ (!NEWLINE ~ ANY)* ~ (NEWLINE | EOI) }

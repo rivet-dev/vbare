@@ -53,33 +53,59 @@ pub struct StructField {
     pub type_r: AnyType,
 }
 
-pub fn parse_string(schema: &str) -> BTreeMap<String, AnyType> {
-    let schema = BARE::parse(Rule::schema, &schema)
-        .unwrap_or_else(|e| panic!("{}", e))
+pub fn imports(schema: &str) -> Result<Vec<String>, String> {
+    let parsed = BARE::parse(Rule::schema, schema)
+        .map_err(|error| error.to_string())?
         .next()
-        .unwrap(); // this can't fail if parsing didn't fail
-    if schema.as_rule() != Rule::schema {
-        unreachable!()
-    }
-    let mut user_type_registry: BTreeMap<String, AnyType> = BTreeMap::default();
-    for user_types in schema.into_inner() {
-        if user_types.as_rule() == Rule::EOI {
-            break;
+        .unwrap();
+    let mut imports = Vec::new();
+    for item in parsed
+        .into_inner()
+        .filter(|item| item.as_rule() == Rule::import)
+    {
+        let line_start = schema[..item.as_span().start()]
+            .rfind('\n')
+            .map_or(0, |i| i + 1);
+        if !schema[line_start..item.as_span().start()].trim().is_empty() {
+            return Err("#import must be on its own line".into());
         }
-        let mut inner = user_types.into_inner();
-        let user_type_name = inner.next().unwrap();
-        let user_type_type = inner.next().unwrap();
-        if user_type_registry.contains_key(user_type_name.as_str()) {
-            panic!("Duplicate definition: {:?}", user_type_name.as_span())
-        }
-        let t = parse_any_type(&user_type_registry, user_type_type);
-        user_type_registry.insert(user_type_name.as_str().into(), t);
+        imports.push(item.into_inner().next().unwrap().as_str().to_owned());
     }
-    user_type_registry
+    Ok(imports)
 }
 
-fn parse_any_type(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
-    match pair.as_rule() {
+pub fn parse_string(
+    schema: &str,
+    imported: &BTreeMap<String, AnyType>,
+) -> Result<BTreeMap<String, AnyType>, String> {
+    let schema = BARE::parse(Rule::schema, schema)
+        .map_err(|error| error.to_string())?
+        .next()
+        .unwrap();
+    let mut registry = imported.clone();
+    let mut local = BTreeMap::new();
+    for item in schema.into_inner() {
+        if item.as_rule() != Rule::user_type {
+            continue;
+        }
+        let mut inner = item.into_inner();
+        let name = inner.next().unwrap().as_str();
+        let definition = inner.next().unwrap();
+        if registry.contains_key(name) {
+            return Err(format!("duplicate or shadowed type {name}"));
+        }
+        let value = parse_any_type(&registry, definition)?;
+        registry.insert(name.to_owned(), value.clone());
+        local.insert(name.to_owned(), value);
+    }
+    Ok(local)
+}
+
+fn parse_any_type(
+    registry: &BTreeMap<String, AnyType>,
+    pair: Pair<'_, Rule>,
+) -> Result<AnyType, String> {
+    Ok(match pair.as_rule() {
         Rule::unsigned_t => parse_unsigned_int(pair),
         Rule::signed_t => parse_signed_int(pair),
         Rule::void_t => AnyType::Primitive(PrimitiveType::Void),
@@ -96,24 +122,24 @@ fn parse_any_type(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) ->
             }
         }
         Rule::enum_t => parse_enum(pair),
-        Rule::list_t => parse_list(registry, pair),
-        Rule::struct_t => parse_struct(registry, pair),
-        Rule::map_t => parse_map(registry, pair),
-        Rule::union_t => parse_union(registry, pair),
+        Rule::list_t => parse_list(registry, pair)?,
+        Rule::struct_t => parse_struct(registry, pair)?,
+        Rule::map_t => parse_map(registry, pair)?,
+        Rule::union_t => parse_union(registry, pair)?,
         Rule::optional_t => {
             let inner_type = pair.into_inner().next().unwrap();
-            AnyType::Optional(Box::new(parse_any_type(registry, inner_type)))
+            AnyType::Optional(Box::new(parse_any_type(registry, inner_type)?))
         }
         Rule::user_type_name => {
             let user_type = pair.as_str();
             if registry.contains_key(user_type) {
                 AnyType::TypeReference(user_type.into())
             } else {
-                panic!("User type {user_type} has not been defined yet.");
+                return Err(format!("user type {user_type} has not been defined yet"));
             }
         }
         x => panic!("Unreachable: {x:?}"),
-    }
+    })
 }
 
 fn parse_unsigned_int(pair: Pair<'_, Rule>) -> AnyType {
@@ -152,53 +178,65 @@ fn parse_enum(pair: Pair<'_, Rule>) -> AnyType {
     AnyType::Enum(members)
 }
 
-fn parse_list(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
+fn parse_list(
+    registry: &BTreeMap<String, AnyType>,
+    pair: Pair<'_, Rule>,
+) -> Result<AnyType, String> {
     let mut list = pair.into_inner();
     let list_type = list.next().unwrap();
-    let inner = parse_any_type(registry, list_type);
+    let inner = parse_any_type(registry, list_type)?;
     let length: Option<usize> = list
         .next()
         .and_then(|e: Pair<'_, Rule>| Some(e.as_str().parse().unwrap()));
-    AnyType::List {
+    Ok(AnyType::List {
         inner: Box::new(inner),
         length,
-    }
+    })
 }
 
-fn parse_struct(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
+fn parse_struct(
+    registry: &BTreeMap<String, AnyType>,
+    pair: Pair<'_, Rule>,
+) -> Result<AnyType, String> {
     let mut st = pair.into_inner();
     let mut fields: Vec<StructField> = Vec::new();
     while let Some(struct_t) = st.next() {
         let mut struct_field = struct_t.into_inner();
         let field_name = struct_field.next().unwrap();
         let field_type = struct_field.next().unwrap();
-        let ft = parse_any_type(registry, field_type);
+        let ft = parse_any_type(registry, field_type)?;
         fields.push(StructField {
             name: field_name.as_str().to_string(),
             type_r: ft,
         })
     }
-    AnyType::Struct(fields)
+    Ok(AnyType::Struct(fields))
 }
-fn parse_map(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
+fn parse_map(
+    registry: &BTreeMap<String, AnyType>,
+    pair: Pair<'_, Rule>,
+) -> Result<AnyType, String> {
     let mut map = pair.into_inner();
     let key_t = map.next().unwrap();
     let value_t = map.next().unwrap();
-    let key = parse_any_type(registry, key_t);
-    let value = parse_any_type(registry, value_t);
-    AnyType::Map {
+    let key = parse_any_type(registry, key_t)?;
+    let value = parse_any_type(registry, value_t)?;
+    Ok(AnyType::Map {
         key: Box::new(key),
         value: Box::new(value),
-    }
+    })
 }
-fn parse_union(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
+fn parse_union(
+    registry: &BTreeMap<String, AnyType>,
+    pair: Pair<'_, Rule>,
+) -> Result<AnyType, String> {
     let union_t = pair.into_inner();
     let mut members: Vec<AnyType> = Vec::new();
     for union_member in union_t {
-        let t = parse_any_type(registry, union_member);
+        let t = parse_any_type(registry, union_member)?;
         members.push(t);
     }
-    AnyType::Union(members)
+    Ok(AnyType::Union(members))
 }
 
 fn parse_float(pair: Pair<'_, Rule>) -> AnyType {

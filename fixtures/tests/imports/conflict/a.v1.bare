@@ -1,0 +1,3 @@
+#import "b.v1.bare"
+#import "c.v1.bare"
+type A struct { value: Shared }

@@ -1,0 +1,2 @@
+#import "shared/common.v1.bare"
+type Middle struct { key: SharedKey }

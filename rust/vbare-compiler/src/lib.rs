@@ -1,5 +1,9 @@
 use indoc::formatdoc;
-use std::{fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Configuration for the vbare-compiler.
 ///
@@ -29,54 +33,80 @@ pub fn process_schemas_with_config(
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = std::env::var("OUT_DIR")?;
-    let out_path = Path::new(&out_dir);
+    process_schemas_to_dir(schema_dir, Path::new(&out_dir), config)
+}
 
+/// Generate all `.bare` files recursively, using `schema_dir` as the import root.
+/// Directory names prefix module names; dots and separators become underscores.
+pub fn process_schemas_to_dir(
+    schema_dir: &Path,
+    out_path: &Path,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={}", schema_dir.display());
-
-    let mut all_names = Vec::new();
-
-    for entry in fs::read_dir(schema_dir)?.flatten() {
-        let path = entry.path();
-
-        if path.is_dir() {
-            continue;
+    let mut paths = Vec::new();
+    collect_schemas(schema_dir, Path::new(""), &mut paths)?;
+    paths.sort();
+    let mut names = BTreeMap::new();
+    for path in &paths {
+        let name = vbare_gen::module_name(path)?;
+        if let Some(previous) = names.insert(name.clone(), path.clone()) {
+            return Err(format!(
+                "schemas {} and {} map to the same module {name}",
+                previous.display(),
+                path.display()
+            )
+            .into());
         }
-
-        let bare_name = path
-            .file_name()
-            .ok_or("No file name")?
-            .to_str()
-            .ok_or("Invalid UTF-8 in file name")?
-            .rsplit_once('.')
-            .ok_or("No file extension")?
-            .0;
-
-        let tokens = vbare_gen::bare_schema(&path, config.vbare);
+    }
+    let mut loader = vbare_gen::SchemaLoader::new(schema_dir);
+    let mut mod_content = String::from("// Auto-generated module file for schemas\n\n");
+    for path in paths {
+        let tokens = loader.generate(&path, config.vbare)?;
         let ast = syn::parse2(tokens)?;
         let content = prettyplease::unparse(&ast);
-
-        fs::write(out_path.join(format!("{bare_name}_generated.rs")), content)?;
-
-        all_names.push(bare_name.to_string());
-    }
-
-    let mut mod_content = String::new();
-    mod_content.push_str("// Auto-generated module file for schemas\n\n");
-
-    for name in all_names {
-        let module_name = name.replace('.', "_");
+        let module_name = vbare_gen::module_name(&path)?;
+        // Preserve existing top-level output filenames for build script consumers.
+        let output_name = path
+            .with_extension("")
+            .components()
+            .map(|part| {
+                part.as_os_str()
+                    .to_str()
+                    .ok_or("Invalid UTF-8 in file name")
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .join("_");
+        fs::write(
+            out_path.join(format!("{output_name}_generated.rs")),
+            content,
+        )?;
         mod_content.push_str(&formatdoc!(
             r#"
             pub mod {module_name} {{
-                include!(concat!(env!("OUT_DIR"), "/{name}_generated.rs"));
+                include!(concat!(env!("OUT_DIR"), "/{output_name}_generated.rs"));
             }}
             "#,
-            name = name,
-            module_name = module_name,
         ));
     }
-
     fs::write(out_path.join("combined_imports.rs"), mod_content)?;
+    Ok(())
+}
 
+fn collect_schemas(root: &Path, relative: &Path, paths: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    for entry in fs::read_dir(root.join(relative))? {
+        let entry = entry?;
+        let path = relative.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect_schemas(root, &path, paths)?;
+        } else if kind.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "bare")
+        {
+            paths.push(path);
+        }
+    }
     Ok(())
 }

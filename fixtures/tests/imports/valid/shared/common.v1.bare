@@ -1,0 +1,4 @@
+type SharedKey struct { value: u64 }
+type Fraction struct { value: f64 }
+type Payload data
+type Empty void

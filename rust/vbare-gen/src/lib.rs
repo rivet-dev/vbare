@@ -93,14 +93,16 @@ byte arrays, such as `list<data>`, are not annotated, because `serde_bytes` does
 
 */
 
-use std::{collections::BTreeMap, fs::read_to_string, path::Path};
+use std::{collections::BTreeMap, path::Path};
 
 use heck::{ToSnakeCase, ToUpperCamelCase};
-use parser::{parse_string, AnyType, PrimitiveType, StructField};
+use parser::{AnyType, PrimitiveType, StructField};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
+mod imports;
 mod parser;
+pub use imports::{module_name, SchemaLoader};
 
 /// Configuration for `bare_schema` code generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -153,18 +155,12 @@ impl Caps {
 /// path is treated as relative to the file location of the macro's use.
 /// For details on how the BARE data model maps to the Rust data model, see the [`Serialize`
 /// derive macro's documentation.](https://docs.rs/serde_bare/latest/serde_bare/)
-pub fn bare_schema(schema_path: &Path, _config: Config) -> proc_macro2::TokenStream {
-    let file = read_to_string(schema_path).unwrap();
-    let mut schema_generator = SchemaGenerator {
-        global_output: Default::default(),
-        user_type_registry: parse_string(&file),
-    };
-
-    for (name, user_type) in &schema_generator.user_type_registry.clone() {
-        schema_generator.gen_user_type(&name, &user_type);
-    }
-
-    schema_generator.complete()
+pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStream {
+    let root = schema_path.parent().unwrap_or_else(|| Path::new("."));
+    let name = schema_path.file_name().expect("schema file name");
+    SchemaLoader::new(root)
+        .generate(Path::new(name), config)
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 struct SchemaGenerator {

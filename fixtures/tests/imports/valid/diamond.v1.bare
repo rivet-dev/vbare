@@ -1,0 +1,3 @@
+#import "shared/middle.v2.bare"
+#import "shared/common.v1.bare"
+type Diamond struct { key: SharedKey }

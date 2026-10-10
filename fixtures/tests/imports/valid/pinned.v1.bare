@@ -1,0 +1,2 @@
+#import "shared/common.v7.bare"
+type Pinned struct { key: SharedKey }

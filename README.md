@@ -101,6 +101,40 @@ The core of why VBARE was designed this way is:
 - Stop making big breaking v1 to v2 changes — instead, **make much smaller schema changes** with more flexibility
 - Schema evolution frequently requires more than just renaming properties (like Protobuf, Flatbuffers, Cap'n'proto) — **more complicated reshaping & fetching data** from remote sources is commonly needed
 
+## Imports (Rust compiler)
+
+Share types between schema files with an import before any type declarations:
+
+```bare
+#import "shared/example.types.v1.bare"
+
+type Message struct {
+  key: SharedKey
+  previous: optional<SharedKey>
+}
+```
+
+Paths are relative to the schema root passed to `process_schemas_with_config`,
+including for importers in subdirectories. The compiler recursively discovers
+`.bare` files. Each import names an exact file, so importing `v1` continues to use
+that version even when `v2` exists. A shared file's version does not change the
+importer's version.
+
+Each file is generated once. Strip `.bare` and replace dots and directory
+separators with underscores to get its Rust module name: for example,
+`shared/example.types.v1.bare` becomes `shared_example_types_v1`.
+`combined_imports.rs` includes every module. Importers use the shared modules'
+types directly, without generating copies. The low-level `SchemaLoader` API also
+accepts an explicit schema root; `bare_schema` uses the schema's parent directory.
+
+Imports are transitive. Cycles, missing files, conflicting type definitions, local
+types shadowing imported names, and module-name collisions are errors.
+Reaching the same defining file through multiple imports is allowed. Import
+paths must stay within the schema root and cannot contain `..`.
+
+The TypeScript compiler delegates parsing to `@bare-ts/tools`; this Rust import
+extension is not implemented by that external parser.
+
 ## Implementations
 
 - [TypeScript](./typescript/)

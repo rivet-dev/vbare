@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
+serde_bytes = "0.11"
 serde_bare = { workspace = true }
 vbare = { path = "../../vbare" }
 

@@ -1,0 +1,2 @@
+#import "b.v1.bare"
+type Shared str

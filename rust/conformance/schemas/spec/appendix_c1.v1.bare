@@ -1,0 +1,12 @@
+# draft-devault-bare-11 Appendix C.1, verbatim.
+type Element struct {
+  what: str
+}
+
+type LinkedList list<Element>
+
+type Node optional<struct {
+  what: str
+}>
+
+type BinaryTree list<Node>

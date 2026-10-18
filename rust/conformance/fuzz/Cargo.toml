@@ -1,0 +1,37 @@
+[package]
+name = "vbare-conformance-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+vbare-conformance = { path = ".." }
+
+# Kept out of the main workspace because `cargo fuzz` needs a nightly toolchain.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "reference"
+path = "fuzz_targets/reference.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "basic"
+path = "fuzz_targets/basic.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "candidate"
+path = "fuzz_targets/candidate.rs"
+test = false
+doc = false
+bench = false

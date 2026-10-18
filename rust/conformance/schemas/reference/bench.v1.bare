@@ -1,0 +1,21 @@
+# Messages for the codec benchmarks.
+type Small struct {
+  id: u64
+  name: str
+  active: bool
+  score: u32
+}
+
+type Blob struct {
+  id: u64
+  body: data
+}
+
+type Item struct {
+  id: u32
+  label: str
+}
+
+type Many struct {
+  items: list<Item>
+}

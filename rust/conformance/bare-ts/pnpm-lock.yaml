@@ -1,0 +1,37 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@bare-ts/lib':
+        specifier: 0.7.0
+        version: 0.7.0
+      '@bare-ts/tools':
+        specifier: 0.16.1
+        version: 0.16.1(@bare-ts/lib@0.7.0)
+
+packages:
+
+  '@bare-ts/lib@0.7.0':
+    resolution: {integrity: sha512-/xXHxqB/9RJA8fSkEL60IKwESvJZnGuEO1WORbr7Htw5mErtf2eoCHCHc0iMvKu2NY83/qr5Hl/iLUZOOqXcpw==}
+    engines: {node: '>=16.9.0'}
+
+  '@bare-ts/tools@0.16.1':
+    resolution: {integrity: sha512-eKXTnVqzuKDxr1ozKsFSZfM1wcN4g/iMRnG9GB2fA8oyUcHxwokJC50CANfuSLe6rLnjhZ8Ave1Y2TnZqUqGcQ==}
+    engines: {node: '>=20.0.0'}
+    hasBin: true
+    peerDependencies:
+      '@bare-ts/lib': '>=0.3.0 <=0.4.0'
+
+snapshots:
+
+  '@bare-ts/lib@0.7.0': {}
+
+  '@bare-ts/tools@0.16.1(@bare-ts/lib@0.7.0)':
+    dependencies:
+      '@bare-ts/lib': 0.7.0

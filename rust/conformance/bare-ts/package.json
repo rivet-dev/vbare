@@ -1,0 +1,18 @@
+{
+  "name": "vbare-conformance-bare-ts",
+  "private": true,
+  "type": "module",
+  "description": "Cross-checks vbare conformance vectors against bare-ts",
+  "license": "MIT",
+  "dependencies": {
+    "@bare-ts/lib": "0.7.0",
+    "@bare-ts/tools": "0.16.1"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@bare-ts/lib": "0.7"
+      }
+    }
+  }
+}

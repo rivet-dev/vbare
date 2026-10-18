@@ -1,0 +1,11 @@
+# Values bare-ts cannot represent: bare-ts only supports enum values and union tags up to
+# 2^53 - 1.
+type Extreme enum {
+  ZERO
+  MAX = 18446744073709551615
+}
+
+type FarTag union {
+  u8
+  | str = 18446744073709551615
+}

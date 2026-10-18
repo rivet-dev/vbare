@@ -1,5 +1,6 @@
 [workspace]
-members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic"]
+members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic", "conformance"]
+exclude = ["conformance/fuzz"]
 resolver = "2"
 
 [workspace.package]

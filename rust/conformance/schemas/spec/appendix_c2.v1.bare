@@ -1,0 +1,21 @@
+# draft-devault-bare-11 Appendix C.2, verbatim.
+type ElementId uint
+
+type False void
+type True void
+type Null void
+
+type Object map<str><ElementId>
+type Array list<ElementId>
+
+type Element union {
+  | False
+  | True
+  | Null
+  | f64
+  | str
+  | Object
+  | Array
+}
+
+type JSONDocument list<Element>

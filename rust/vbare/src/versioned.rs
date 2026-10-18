@@ -111,6 +111,34 @@ pub trait Versioned: Sized + 'static {
         Self::seal(value, version, &mut out)?;
         Ok(out)
     }
+
+    /// [`decode`](Versioned::decode) from a slice, under vbare 0.1's name. Copies `payload` once;
+    /// callers that hold `Bytes` should call `decode` instead.
+    fn deserialize_with_embedded_version(payload: &[u8]) -> anyhow::Result<Self::Latest> {
+        Ok(Self::decode(Bytes::copy_from_slice(payload))?)
+    }
+
+    /// [`seal_to_vec`](Versioned::seal_to_vec) under vbare 0.1's name. Takes the value by
+    /// reference, so callers no longer clone it into [`wrap_latest`](Versioned::wrap_latest).
+    fn serialize_with_embedded_version(
+        value: &Self::Latest,
+        version: u16,
+    ) -> anyhow::Result<Vec<u8>> {
+        Ok(Self::seal_to_vec(value, version)?)
+    }
+
+    /// [`decode_body`](Versioned::decode_body) from a slice, under vbare 0.1's name. Copies
+    /// `payload` once.
+    fn deserialize(payload: &[u8], version: u16) -> anyhow::Result<Self::Latest> {
+        Ok(Self::decode_body(Bytes::copy_from_slice(payload), version)?)
+    }
+
+    /// [`encode_body`](Versioned::encode_body) into a new `Vec`, under vbare 0.1's name.
+    fn serialize(value: &Self::Latest, version: u16) -> anyhow::Result<Vec<u8>> {
+        let mut out = Vec::with_capacity(value.encoded_len());
+        Self::encode_body(value, version, &mut out)?;
+        Ok(out)
+    }
 }
 
 fn split_header(mut bytes: Bytes) -> Result<(u16, Bytes), DecodeError> {

@@ -347,3 +347,39 @@ fn no_converters() {
         DecodeErrorKind::UnsupportedVersion
     );
 }
+
+#[test]
+fn slice_helpers_match_the_bytes_api() {
+    let value = latest();
+    for version in 1..=3u16 {
+        let sealed = TestData::serialize_with_embedded_version(&value, version).unwrap();
+        assert_eq!(sealed, TestData::seal_to_vec(&value, version).unwrap());
+        assert_eq!(
+            TestData::deserialize_with_embedded_version(&sealed).unwrap(),
+            TestData::decode(Bytes::from(sealed.clone())).unwrap()
+        );
+
+        let body = TestData::serialize(&value, version).unwrap();
+        assert_eq!(body, sealed[2..]);
+        assert_eq!(
+            TestData::deserialize(&body, version).unwrap(),
+            TestData::decode_body(Bytes::from(body.clone()), version).unwrap()
+        );
+    }
+    assert_eq!(
+        TestData::deserialize_with_embedded_version(&TestData::seal_to_vec(&value, 3).unwrap())
+            .unwrap(),
+        value
+    );
+
+    let error = TestData::deserialize_with_embedded_version(&[9, 0]).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<DecodeError>().map(DecodeError::kind),
+        Some(DecodeErrorKind::UnsupportedVersion)
+    );
+    let error = TestData::serialize(&value, 0).unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<EncodeError>(),
+        Some(EncodeError::UnsupportedVersion(0))
+    ));
+}

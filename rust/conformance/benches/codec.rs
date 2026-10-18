@@ -1,7 +1,11 @@
-//! Test 10: serde_bare `from_slice`/`to_vec` against the candidate's `view`, `decode` and
-//! `encode` for a small struct, a 4 KiB `data` message and a 1,000-element list.
+//! Test 10: serde_bare `from_slice`/`to_vec` against the candidate's `verify`, `view`, `decode`
+//! and `encode` for a small struct, a 4 KiB `data` message and a 1,000-element list.
+//!
+//! `view` and `decode` take the buffer by value. Their main cases clone it in untimed setup, so
+//! they measure only the codec. The cases labeled `with clone` clone inside the timed loop, which
+//! keeps them comparable with earlier runs that measured that way.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 use vbare::{Bytes, Encode, Message, View};
 use vbare_conformance::{
@@ -20,10 +24,27 @@ where
     group.bench_function(BenchmarkId::new("decode", "serde_bare"), |b| {
         b.iter(|| C::ref_from_slice(black_box(&bytes)).unwrap())
     });
+    group.bench_function(BenchmarkId::new("decode", "vbare verify"), |b| {
+        b.iter(|| vbare::verify::<C::Wire>(black_box(&bytes)).unwrap())
+    });
     group.bench_function(BenchmarkId::new("decode", "vbare view"), |b| {
+        b.iter_batched(
+            || bytes.clone(),
+            |input| View::<C::Wire>::new(black_box(input)).unwrap(),
+            BatchSize::SmallInput,
+        )
+    });
+    group.bench_function(BenchmarkId::new("decode", "vbare view with clone"), |b| {
         b.iter(|| View::<C::Wire>::new(black_box(bytes.clone())).unwrap())
     });
     group.bench_function(BenchmarkId::new("decode", "vbare decode"), |b| {
+        b.iter_batched(
+            || bytes.clone(),
+            |input| C::Owned::decode(black_box(input)).unwrap(),
+            BatchSize::SmallInput,
+        )
+    });
+    group.bench_function(BenchmarkId::new("decode", "vbare decode with clone"), |b| {
         b.iter(|| C::Owned::decode(black_box(bytes.clone())).unwrap())
     });
     group.bench_function(BenchmarkId::new("encode", "serde_bare"), |b| {

@@ -46,14 +46,16 @@ fn run_bare_ts(corpora: &[PathBuf]) {
         panic!("test 4 needs Node.js on PATH to run bare-ts (rust/conformance/bare-ts/check.mjs)");
     }
     if !dir.join("node_modules/@bare-ts/tools").exists() {
+        // `--ignore-workspace` keeps pnpm from installing an enclosing workspace instead when this
+        // crate is vendored inside another pnpm repository.
         let installed = Command::new("pnpm")
-            .args(["install", "--frozen-lockfile"])
+            .args(["install", "--frozen-lockfile", "--ignore-workspace"])
             .current_dir(&dir)
             .status()
             .is_ok_and(|status| status.success());
         assert!(
             installed,
-            "could not install bare-ts; run `pnpm install --frozen-lockfile` in {}",
+            "could not install bare-ts; run `pnpm install --frozen-lockfile --ignore-workspace` in {}",
             dir.display()
         );
     }

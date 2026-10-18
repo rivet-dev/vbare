@@ -66,6 +66,10 @@ async function loadSchema(name) {
     // Generated modules import @bare-ts/lib, so they must live beside node_modules.
     const outDir = join(here, ".generated");
     mkdirSync(outDir, { recursive: true });
+    // bare-ts adds `import * as ext from "./ext.js"` whenever the output matches /ext\./, which
+    // also matches type names ending in "ext" such as `StopNext.Sleep`. Nothing is imported
+    // from it, so an empty module satisfies the import.
+    writeFileSync(join(outDir, "ext.js"), "export {}\n");
     const file = join(outDir, `${process.pid}-${generatedCount++}.mjs`);
     writeFileSync(file, transform(source, { generator: "js" }));
     const module = await import(pathToFileURL(file).href);

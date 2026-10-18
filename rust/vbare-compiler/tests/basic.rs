@@ -41,8 +41,7 @@ fn processes_basic_fixtures() {
                 None => line,
             };
             let trimmed = line_wo_comment.trim_start();
-            let converted = if trimmed.starts_with("enum ") {
-                let rest = &trimmed["enum ".len()..];
+            let converted = if let Some(rest) = trimmed.strip_prefix("enum ") {
                 if let Some(brace_idx) = rest.find('{') {
                     let name = rest[..brace_idx].trim();
                     format!("type {name} enum {{")
@@ -82,8 +81,7 @@ fn processes_basic_fixtures() {
                 let mut end = start;
                 let mut brace_count = 0i32;
                 let mut seen_open = false;
-                for i in start..lines.len() {
-                    let l = lines[i];
+                for (i, l) in lines.iter().enumerate().skip(start) {
                     if l.contains('{') {
                         brace_count += 1;
                         seen_open = true;
@@ -104,19 +102,15 @@ fn processes_basic_fixtures() {
             let change_block = extract_block(&mut lines_all, "type Change struct");
             let kind_block = extract_block(&mut lines_all, "type ChangeKind enum");
 
-            if change_block.is_some() && kind_block.is_some() {
+            if let (Some(change_block), Some(kind_block)) = (change_block, kind_block) {
                 let insert_at = lines_all
                     .iter()
                     .position(|l| l.trim_start().starts_with("type Todo struct"))
                     .unwrap_or(lines_all.len());
                 let mut rebuilt: Vec<&str> = Vec::new();
                 rebuilt.extend_from_slice(&lines_all[..insert_at]);
-                for l in kind_block.unwrap() {
-                    rebuilt.push(l);
-                }
-                for l in change_block.unwrap() {
-                    rebuilt.push(l);
-                }
+                rebuilt.extend(kind_block);
+                rebuilt.extend(change_block);
                 rebuilt.extend_from_slice(&lines_all[insert_at..]);
                 normalized = rebuilt.join("\n");
             }

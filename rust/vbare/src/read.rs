@@ -346,4 +346,30 @@ impl<'a> Verifier<'a> {
             )
         })
     }
+
+    /// Reads `len` bytes as shared [`Bytes`] without copying. Fails exactly like
+    /// [`take`](Verifier::take).
+    #[inline]
+    pub fn take_bytes(&mut self, len: usize) -> Result<Bytes, DecodeError> {
+        let from = self.pos;
+        self.take(len)?;
+        Ok(self.base.slice(from..self.pos))
+    }
+
+    /// Reads a length-prefixed `data` as shared [`Bytes`]. Fails exactly like
+    /// [`data`](Verifier::data).
+    #[inline]
+    pub fn data_owned(&mut self) -> Result<Bytes, DecodeError> {
+        let len = self.length(1)?;
+        self.take_bytes(usize::try_from(len).unwrap_or(usize::MAX))
+    }
+
+    /// Reads a length-prefixed `str` as a shared [`Str`] after validating it as UTF-8. Fails
+    /// exactly like [`str`](Verifier::str).
+    #[inline]
+    pub fn str_owned(&mut self) -> Result<Str, DecodeError> {
+        let len = self.str()?.len();
+        let from = self.pos - len;
+        Ok(Str::from_verified(self.base.slice(from..self.pos)))
+    }
 }

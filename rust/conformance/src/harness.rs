@@ -55,6 +55,8 @@ pub struct Entry {
     pub sample: fn(&mut TestRunner) -> Vec<u8>,
     pub candidate_canonical: fn(&[u8]) -> Result<Vec<u8>, vbare::DecodeError>,
     pub candidate_fuzz: fn(&[u8]) -> Result<(), String>,
+    /// Checks that single-pass `decode` and `view` agree on any input (see [`decode_agreement`]).
+    pub decode_agreement: fn(&[u8]) -> Result<(), String>,
     pub reference: Option<ReferenceEntry>,
 }
 
@@ -78,6 +80,7 @@ impl Entry {
             sample: sample::<C>,
             candidate_canonical: candidate_canonical::<C>,
             candidate_fuzz: candidate_fuzz::<C>,
+            decode_agreement: decode_agreement::<C>,
             reference: None,
         }
     }
@@ -194,6 +197,45 @@ pub fn check_valid<C: Case>(bytes: &[u8], canonical: &[u8]) -> Result<(), String
     Ok(())
 }
 
+/// Checks that `decode`, which verifies and builds the owned value in one pass, agrees with
+/// `view`, which verifies first, on any input. When both accept, `decode(bytes)` equals
+/// `view(bytes).to_owned()`. When both reject, the errors have the same kind, offset and path.
+pub fn decode_agreement<C: Case>(bytes: &[u8]) -> Result<(), String> {
+    let input = Bytes::copy_from_slice(bytes);
+    let decoded = vbare::decode::<C::Wire>(&input);
+    let viewed = View::<C::Wire>::new(input);
+    match (decoded, viewed) {
+        (Ok(decoded), Ok(view)) => {
+            let converted = view.to_owned();
+            if floats_aware_eq::<C>(&decoded, &converted) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "decode and view.to_owned() differ on {bytes:02x?}:\n  decode   {decoded:?}\n  to_owned {converted:?}"
+                ))
+            }
+        }
+        (Err(decoded), Err(viewed)) => {
+            let same = decoded.kind() == viewed.kind()
+                && decoded.offset() == viewed.offset()
+                && decoded.path() == viewed.path();
+            if same {
+                Ok(())
+            } else {
+                Err(format!(
+                    "decode and view reject {bytes:02x?} differently:\n  decode {decoded}\n  view   {viewed}"
+                ))
+            }
+        }
+        (Ok(_), Err(error)) => Err(format!(
+            "decode accepted {bytes:02x?}, view rejected it: {error}"
+        )),
+        (Err(error), Ok(_)) => Err(format!(
+            "view accepted {bytes:02x?}, decode rejected it: {error}"
+        )),
+    }
+}
+
 /// Encodes values, then checks decode, view, verbatim re-encode, truncation and trailing bytes.
 fn roundtrip<C: Case>(cases: u32) -> Result<(), String> {
     run(cases, C::strategy(), |value| {
@@ -202,6 +244,7 @@ fn roundtrip<C: Case>(cases: u32) -> Result<(), String> {
             return Err("encoded_len differs from the encoding".into());
         }
         check_valid::<C>(&bytes, &bytes)?;
+        decode_agreement::<C>(&bytes)?;
         let decoded =
             vbare::decode::<C::Wire>(&Bytes::from(bytes.clone())).map_err(|e| e.to_string())?;
         if !floats_aware_eq::<C>(&decoded, &value) {
@@ -210,6 +253,7 @@ fn roundtrip<C: Case>(cases: u32) -> Result<(), String> {
         check_rejects_prefixes::<C>(&bytes)?;
         let mut trailing = bytes.clone();
         trailing.push(0);
+        decode_agreement::<C>(&trailing)?;
         match vbare::verify::<C::Wire>(&Bytes::from(trailing)) {
             Err(error) if error.kind() == DecodeErrorKind::TrailingBytes => Ok(()),
             Err(error) => Err(format!("trailing byte: wrong error {error}")),
@@ -224,14 +268,16 @@ fn floats_aware_eq<C: Case>(a: &C::Owned, b: &C::Owned) -> bool {
     encode::<C>(a) == encode::<C>(b)
 }
 
-/// Every strict prefix of a valid message must be rejected. Long messages are checked at a
-/// bounded number of offsets.
+/// Every strict prefix of a valid message must be rejected, by `decode` exactly as by `view`.
+/// Long messages are checked at a bounded number of offsets.
 fn check_rejects_prefixes<C: Case>(bytes: &[u8]) -> Result<(), String> {
     let step = (bytes.len() / 512).max(1);
     for len in (0..bytes.len()).step_by(step) {
-        if vbare::verify::<C::Wire>(&Bytes::copy_from_slice(&bytes[..len])).is_ok() {
+        let prefix = &bytes[..len];
+        if vbare::verify::<C::Wire>(&Bytes::copy_from_slice(prefix)).is_ok() {
             return Err(format!("accepted a {len}-byte prefix of {bytes:02x?}"));
         }
+        decode_agreement::<C>(prefix)?;
     }
     Ok(())
 }
@@ -354,9 +400,10 @@ fn differential<C: ReferenceCase>(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Candidate-only fuzz invariants: never panic, and accepted input views and re-encodes
-/// verbatim.
+/// Candidate-only fuzz invariants: never panic, `decode` agrees with `view` on acceptance, value
+/// and error, and accepted input views and re-encodes verbatim.
 fn candidate_fuzz<C: Case>(bytes: &[u8]) -> Result<(), String> {
+    decode_agreement::<C>(bytes)?;
     if let Ok(canonical) = candidate_canonical::<C>(bytes) {
         check_valid::<C>(bytes, &canonical)?;
         check_valid::<C>(&canonical, &canonical)?;

@@ -71,9 +71,14 @@ pub fn verify<W: Wire>(bytes: &Bytes) -> Result<W::Ref<'_>, DecodeError> {
 }
 
 /// Verifies `bytes` and converts them to an owned `W`, sharing `str` and `data` bytes.
+///
+/// Verification and construction happen in one pass over the input. The result and every
+/// rejection match [`verify`] followed by [`View::to_owned`].
 pub fn decode<W: Wire>(bytes: &Bytes) -> Result<W::Owned, DecodeError> {
-    verify::<W>(bytes)?;
-    Ok(W::read_owned(&mut Reader::new(bytes)))
+    let mut verifier = Verifier::new(bytes)?;
+    let value = W::verify_owned(&mut verifier)?;
+    verifier.finish()?;
+    Ok(value)
 }
 
 /// A verified message that owns its buffer. Accessing fields reads them in place.

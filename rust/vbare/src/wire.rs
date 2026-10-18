@@ -64,6 +64,20 @@ pub unsafe trait Wire: 'static {
     /// Reads one verified value as owned, sharing `str` and `data` bytes with the input.
     fn read_owned(r: &mut Reader<'_>) -> Self::Owned;
 
+    /// Checks one value at the verifier's position and returns it as owned, sharing `str` and
+    /// `data` bytes with the input.
+    ///
+    /// An implementation must accept exactly the inputs [`verify`](Wire::verify) accepts,
+    /// consuming the same bytes and producing what [`read_owned`](Wire::read_owned) would, and
+    /// must fail on every other input with the error `verify` returns: the same kind, offset and
+    /// path. The default verifies and then reads the value a second time. Built-in and generated
+    /// implementations build the value during verification instead.
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<Self::Owned, DecodeError> {
+        let start = v.position();
+        Self::verify(v)?;
+        Ok(Self::read_owned(&mut v.reader_since(start)))
+    }
+
     fn encoded_len(value: &Self::Owned) -> usize;
 
     fn encode<S: Sink>(value: &Self::Owned, out: &mut S);
@@ -150,6 +164,11 @@ unsafe impl Wire for Uint {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<u64, DecodeError> {
+        v.uint()
+    }
+
+    #[inline]
     fn encoded_len(value: &u64) -> usize {
         varint::uint_len(*value)
     }
@@ -201,6 +220,11 @@ unsafe impl Wire for Int {
     #[inline]
     fn read_owned(r: &mut Reader<'_>) -> i64 {
         r.int()
+    }
+
+    #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<i64, DecodeError> {
+        v.int()
     }
 
     #[inline]
@@ -263,6 +287,11 @@ macro_rules! fixed_number {
             #[inline]
             fn read_owned(r: &mut Reader<'_>) -> $ty {
                 Self::read(r)
+            }
+
+            #[inline]
+            fn verify_owned(v: &mut Verifier<'_>) -> Result<$ty, DecodeError> {
+                Self::verify(v)
             }
 
             #[inline]
@@ -372,6 +401,11 @@ unsafe impl Wire for Bool {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<bool, DecodeError> {
+        v.bool()
+    }
+
+    #[inline]
     fn encoded_len(_: &bool) -> usize {
         1
     }
@@ -431,6 +465,11 @@ unsafe impl Wire for Str {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<crate::Str, DecodeError> {
+        v.str_owned()
+    }
+
+    #[inline]
     fn encoded_len(value: &crate::Str) -> usize {
         varint::uint_len(value.len() as u64) + value.len()
     }
@@ -484,6 +523,11 @@ unsafe impl Wire for Data {
     #[inline]
     fn read_owned(r: &mut Reader<'_>) -> Bytes {
         r.data_owned()
+    }
+
+    #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<Bytes, DecodeError> {
+        v.data_owned()
     }
 
     #[inline]
@@ -541,6 +585,11 @@ unsafe impl<const N: usize> Wire for FixedData<N> {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<[u8; N], DecodeError> {
+        v.array::<N>()
+    }
+
+    #[inline]
     fn encoded_len(_: &[u8; N]) -> usize {
         N
     }
@@ -595,6 +644,12 @@ unsafe impl<const N: usize> Wire for FixedDataBytes<N> {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<FixedBytes<N>, DecodeError> {
+        let bytes = v.take_bytes(N)?;
+        Ok(FixedBytes::new(bytes).unwrap_or_default())
+    }
+
+    #[inline]
     fn encoded_len(_: &FixedBytes<N>) -> usize {
         N
     }
@@ -636,6 +691,11 @@ unsafe impl Wire for Void {
 
     #[inline]
     fn read_owned(_: &mut Reader<'_>) {}
+
+    #[inline]
+    fn verify_owned(_: &mut Verifier<'_>) -> Result<(), DecodeError> {
+        Ok(())
+    }
 
     #[inline]
     fn encoded_len(_: &()) -> usize {
@@ -708,6 +768,18 @@ unsafe impl<T: Wire> Wire for Optional<T> {
             None
         } else {
             Some(T::read_owned(r))
+        }
+    }
+
+    #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<Option<T::Owned>, DecodeError> {
+        match v.array::<1>()? {
+            [0] => Ok(None),
+            [1] => T::verify_owned(v).map(Some),
+            _ => Err(DecodeError::new(
+                DecodeErrorKind::InvalidTag,
+                v.position() - 1,
+            )),
         }
     }
 
@@ -834,6 +906,20 @@ unsafe impl<T: Wire> Wire for List<T> {
     }
 
     #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<Vec<T::Owned>, DecodeError> {
+        let count = v.length(T::MIN_SIZE)?;
+        // The length check bounds the count by the remaining input.
+        let capacity = usize::try_from(count)
+            .unwrap_or(usize::MAX)
+            .min(v.remaining_len());
+        let mut out = Vec::with_capacity(capacity);
+        for index in 0..count {
+            out.push(T::verify_owned(v).map_err(|error| error.in_index(index))?);
+        }
+        Ok(out)
+    }
+
+    #[inline]
     fn encoded_len(value: &Vec<T::Owned>) -> usize {
         let elements: usize = value.iter().map(T::encoded_len).sum();
         varint::uint_len(value.len() as u64) + elements
@@ -887,6 +973,10 @@ unsafe impl<T: Wire, const N: usize> Wire for FixedList<T, N> {
     fn read_span(r: Reader<'_>) -> ListRef<'_, T> {
         ListRef::new(r, N as u64)
     }
+
+    // `verify_owned` keeps the default, which verifies the array and then reads it. Building
+    // `[T::Owned; N]` while stopping at the first invalid element would need unsafe code or a
+    // temporary `Vec`.
 
     #[inline]
     fn read_owned(r: &mut Reader<'_>) -> [T::Owned; N] {
@@ -1018,6 +1108,31 @@ where
             out.insert(key, value);
         }
         out
+    }
+
+    /// Matches [`verify`](Wire::verify): a pair that fails to verify is reported before a
+    /// duplicate key, and a duplicate is reported at the count's offset. [`Key`] requires owned
+    /// keys to order like borrowed ones, so the map finds exactly the duplicates `verify` does.
+    #[inline]
+    fn verify_owned(v: &mut Verifier<'_>) -> Result<BTreeMap<K::Owned, V::Owned>, DecodeError> {
+        let count_offset = v.position();
+        let count = v.length(K::MIN_SIZE.saturating_add(V::MIN_SIZE))?;
+        let mut out = BTreeMap::new();
+        let mut duplicate = false;
+        for index in 0..count {
+            let key = K::verify_owned(v).map_err(|error| error.in_index(index))?;
+            let value = V::verify_owned(v).map_err(|error| error.in_index(index))?;
+            if out.insert(key, value).is_some() {
+                duplicate = true;
+            }
+        }
+        if duplicate {
+            return Err(DecodeError::new(
+                DecodeErrorKind::DuplicateMapKey,
+                count_offset,
+            ));
+        }
+        Ok(out)
     }
 
     #[inline]

@@ -1,5 +1,6 @@
-//! Test 9: `view` and every `Ref` accessor allocate nothing, and `to_owned` allocates only for
-//! list and map containers, never for `str` or `data` bytes.
+//! Test 9: `view` and every `Ref` accessor allocate nothing, and `to_owned` and `decode` allocate
+//! only for list and map containers, never for `str` or `data` bytes. `decode` allocates no more
+//! than `view` followed by `to_owned`.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -189,6 +190,20 @@ fn to_owned_allocates_only_containers() {
         let (_, small_allocations, small_bytes) = decode(&small);
         let (_, large_allocations, large_bytes) = decode(&large);
         assert!(small_allocations > 0, "{name} has containers");
+        // Single-pass decode builds the same containers that `to_owned` builds after `view`.
+        let view_to_owned = |bytes: &Bytes| match name {
+            "Lists" => measure(|| drop(all::Lists::view(bytes.clone()).unwrap().to_owned())),
+            _ => measure(|| drop(all::Maps::view(bytes.clone()).unwrap().to_owned())),
+        };
+        let (_, view_allocations, view_bytes) = view_to_owned(&small);
+        assert!(
+            small_allocations <= view_allocations,
+            "{name} decode allocates more often than view and to_owned"
+        );
+        assert!(
+            small_bytes <= view_bytes,
+            "{name} decode allocates more bytes than view and to_owned"
+        );
         assert_eq!(
             small_allocations, large_allocations,
             "{name} allocation count"

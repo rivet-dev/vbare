@@ -164,7 +164,8 @@ pub fn to_text(corpus: &Value) -> String {
 }
 
 /// Checks the candidate against a corpus: valid vectors decode to their JSON value and
-/// re-encode to their bytes, and invalid vectors are rejected. Returns the number checked.
+/// re-encode to their bytes, invalid vectors are rejected, and `decode` agrees with `view` on
+/// every vector. Returns the number checked.
 pub fn check_candidate(corpus: &Value) -> Result<usize, Vec<String>> {
     let mut failures = Vec::new();
     let mut checked = 0;
@@ -184,6 +185,9 @@ pub fn check_candidate(corpus: &Value) -> Result<usize, Vec<String>> {
         let bytes = from_hex(hex_bytes);
         let result = (entry.candidate_canonical)(&bytes);
         checked += 1;
+        if let Err(error) = (entry.decode_agreement)(&bytes) {
+            failures.push(format!("{label}: {error}"));
+        }
         if let Some(reason) = vector.get("invalid") {
             if result.is_ok() {
                 failures.push(format!(

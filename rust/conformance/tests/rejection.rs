@@ -1,15 +1,40 @@
 //! Test 8: malformed input is rejected with a precise error, and boundary-valid input is
 //! accepted. Truncation at every offset and trailing bytes are also checked for every sampled
-//! value in `identity::candidate_round_trips`.
+//! value in `identity::candidate_round_trips`. Every input here is also decoded in one pass,
+//! which must accept it or reject it exactly as verification does.
 
-use vbare::{Bytes, DecodeErrorKind, Message, View, Wire};
+use vbare::{Bytes, DecodeError, DecodeErrorKind, Message, View, Wire};
 use vbare_conformance::{
     cand::{candidate::tags_v1 as tags, reference::all_v1 as all},
     corpus::from_hex,
 };
 
-fn verify<W: Wire>(hex: &str) -> Result<(), vbare::DecodeError> {
-    vbare::verify::<W>(&Bytes::from(from_hex(hex))).map(|_| ())
+/// Verifies `hex` as `W` after checking that `decode` returns the same outcome: acceptance, or
+/// an error with the same kind, offset and path.
+fn verify<W: Wire>(hex: &str) -> Result<(), DecodeError> {
+    let input = Bytes::from(from_hex(hex));
+    let verified = vbare::verify::<W>(&input).map(|_| ());
+    let decoded = vbare::decode::<W>(&input).map(|_| ());
+    assert_same_outcome(hex, &verified, &decoded);
+    verified
+}
+
+fn assert_same_outcome(
+    label: &str,
+    verified: &Result<(), DecodeError>,
+    decoded: &Result<(), DecodeError>,
+) {
+    match (verified, decoded) {
+        (Ok(()), Ok(())) => {}
+        (Err(verified), Err(decoded)) => {
+            assert_eq!(verified.kind(), decoded.kind(), "{label}: kind");
+            assert_eq!(verified.offset(), decoded.offset(), "{label}: offset");
+            assert_eq!(verified.path(), decoded.path(), "{label}: path");
+        }
+        (verified, decoded) => {
+            panic!("{label}: verify returned {verified:?}, decode returned {decoded:?}")
+        }
+    }
 }
 
 fn kind<W: Wire>(hex: &str) -> DecodeErrorKind {
@@ -112,7 +137,7 @@ fn lengths_and_counts_above_remaining() {
     );
     // Struct elements take at least 8 bytes each, so 3 points need 24.
     let points = format!("00 00 00 03 {} 00 00 00", "00".repeat(16)).replace(' ', "");
-    let error = vbare::verify::<all::ListsWire>(&Bytes::from(from_hex(&points))).unwrap_err();
+    let error = verify::<all::ListsWire>(&points).unwrap_err();
     assert_eq!(error.kind(), DecodeErrorKind::LengthExceedsInput);
 }
 
@@ -122,7 +147,27 @@ fn errors_name_the_failing_field() {
     let input = from_hex("00020161");
     let mut bad = input.clone();
     bad.extend(from_hex("01ff"));
-    let error = all::Lists::decode(Bytes::from(bad)).unwrap_err();
+    let error = all::Lists::decode(Bytes::from(bad.clone())).unwrap_err();
     assert_eq!(error.kind(), DecodeErrorKind::InvalidUtf8);
     assert_eq!(error.path(), "strings[1]");
+    let viewed = all::Lists::view(Bytes::from(bad)).unwrap_err();
+    assert_eq!(viewed.path(), error.path());
+    assert_eq!(viewed.offset(), error.offset());
+}
+
+#[test]
+fn map_duplicates_and_order() {
+    // Dict is map<str><u8>. Pairs in any order are accepted.
+    assert!(verify::<all::DictWire>("02016101016202").is_ok());
+    assert!(verify::<all::DictWire>("02016202016101").is_ok());
+    // A duplicate key is reported at the count, whether the pairs are adjacent or not.
+    for hex in ["02016101016102", "0301610101620201610103"] {
+        let error = verify::<all::DictWire>(hex).unwrap_err();
+        assert_eq!(error.kind(), DecodeErrorKind::DuplicateMapKey, "{hex}");
+        assert_eq!(error.offset(), 0, "{hex}");
+    }
+    // A malformed pair after a duplicate is reported instead of the duplicate.
+    let error = verify::<all::DictWire>("0301610101610101ff02").unwrap_err();
+    assert_eq!(error.kind(), DecodeErrorKind::InvalidUtf8);
+    assert_eq!(error.path(), "[2]");
 }

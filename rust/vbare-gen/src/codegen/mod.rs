@@ -9,6 +9,10 @@
 //!
 //! Type aliases produce aliases for all four. Anonymous aggregates are named first (see
 //! [`hoist`]).
+//!
+//! Generated `verify_owned` methods are `#[inline]`. They are not generic, so without the hint a
+//! caller in another crate, such as `vbare::decode`, cannot inline them, and single-pass decoding
+//! then pays a call per nested type.
 
 pub mod hoist;
 
@@ -479,6 +483,11 @@ impl Generator<'_> {
                     <Self as ::vbare::Wire>::read(r)
                 }
 
+                #[inline]
+                fn verify_owned(v: &mut ::vbare::Verifier<'_>) -> ::std::result::Result<#ident, ::vbare::DecodeError> {
+                    <Self as ::vbare::Wire>::verify(v)
+                }
+
                 fn encoded_len(value: &#ident) -> usize {
                     ::vbare::varint::uint_len(value.value())
                 }
@@ -669,7 +678,8 @@ impl Generator<'_> {
             pub struct #wire_ident;
 
             // SAFETY: `read`, `skip` and `read_owned` visit the fields in the order `verify`
-            // checks them, using each field's own `Wire` implementation.
+            // checks them, using each field's own `Wire` implementation. `verify_owned` checks
+            // them in the same order with the same field paths.
             unsafe impl ::vbare::Wire for #wire_ident {
                 type Ref<'a> = #ref_ident<'a>;
                 type Owned = #ident;
@@ -712,6 +722,14 @@ impl Generator<'_> {
                     #ident {
                         #(#field_idents: <#wires as ::vbare::Wire>::read_owned(r),)*
                     }
+                }
+
+                #[inline]
+                fn verify_owned(v: &mut ::vbare::Verifier<'_>) -> ::std::result::Result<#ident, ::vbare::DecodeError> {
+                    ::std::result::Result::Ok(#ident {
+                        #(#field_idents: <#wires as ::vbare::Wire>::verify_owned(v)
+                            .map_err(|error| error.in_field(#field_names))?,)*
+                    })
                 }
 
                 fn encoded_len(value: &#ident) -> usize {
@@ -796,6 +814,7 @@ impl Generator<'_> {
         let mut skip_arms = Vec::new();
         let mut span_arms = Vec::new();
         let mut owned_arms = Vec::new();
+        let mut verify_owned_arms = Vec::new();
         let mut len_arms = Vec::new();
         let mut encode_arms = Vec::new();
         let mut ref_len_arms = Vec::new();
@@ -815,6 +834,8 @@ impl Generator<'_> {
                 skip_arms.push(quote! { #tag => {} });
                 span_arms.push(quote! { #tag => #ref_ident::#variant });
                 owned_arms.push(quote! { #tag => #ident::#variant });
+                verify_owned_arms
+                    .push(quote! { #tag => ::std::result::Result::Ok(#ident::#variant) });
                 len_arms.push(quote! { #ident::#variant => #tag_len });
                 encode_arms.push(quote! { #ident::#variant => { #put_tag } });
                 ref_len_arms.push(quote! { #ref_ident::#variant => #tag_len });
@@ -839,6 +860,11 @@ impl Generator<'_> {
             });
             owned_arms
                 .push(quote! { #tag => #ident::#variant(<#wire as ::vbare::Wire>::read_owned(r)) });
+            verify_owned_arms.push(quote! {
+                #tag => <#wire as ::vbare::Wire>::verify_owned(v)
+                    .map(#ident::#variant)
+                    .map_err(|error| error.in_field(#variant_name))
+            });
             len_arms.push(quote! {
                 #ident::#variant(value) => #tag_len + <#wire as ::vbare::Wire>::encoded_len(value)
             });
@@ -878,6 +904,14 @@ impl Generator<'_> {
                 quote! { #ref_ident::#first_variant(<#wire as ::vbare::Wire>::read_span(r.rest())) },
                 quote! { #ident::#first_variant(<#wire as ::vbare::Wire>::read_owned(r)) },
             )
+        };
+
+        // `verify` and `verify_owned` reject an unknown tag at the tag's offset.
+        let invalid_tag = quote! {
+            _ => ::std::result::Result::Err(::vbare::DecodeError::new(
+                ::vbare::DecodeErrorKind::InvalidTag,
+                offset,
+            ))
         };
 
         let member_types: Vec<&AnyType> = members.iter().map(|(member, _)| member).collect();
@@ -945,10 +979,7 @@ impl Generator<'_> {
                     let offset = v.position();
                     match v.uint()? {
                         #(#verify_arms,)*
-                        _ => ::std::result::Result::Err(::vbare::DecodeError::new(
-                            ::vbare::DecodeErrorKind::InvalidTag,
-                            offset,
-                        )),
+                        #invalid_tag,
                     }
                 }
 
@@ -983,6 +1014,15 @@ impl Generator<'_> {
                     match r.uint() {
                         #(#owned_arms,)*
                         _ => #owned_fallback,
+                    }
+                }
+
+                #[inline]
+                fn verify_owned(v: &mut ::vbare::Verifier<'_>) -> ::std::result::Result<#ident, ::vbare::DecodeError> {
+                    let offset = v.position();
+                    match v.uint()? {
+                        #(#verify_owned_arms,)*
+                        #invalid_tag,
                     }
                 }
 

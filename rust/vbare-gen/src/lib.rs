@@ -100,6 +100,7 @@ use parser::{AnyType, PrimitiveType, StructField};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
+mod codegen;
 mod imports;
 // Vendored upstream code keeps its own formatting and lint profile.
 #[rustfmt::skip]
@@ -112,6 +113,13 @@ pub use imports::{module_name, SchemaLoader};
 /// The parsed schema representation produced by the vendored parser.
 pub mod ast {
     pub use crate::parser::{AnyType, Length, PrimitiveType, StructField};
+}
+
+/// The names the generator gives to types, fields and variants, for tools that work with
+/// generated code.
+pub mod naming {
+    pub use crate::codegen::hoist::{hoist, Definition};
+    pub use crate::codegen::{rust_enum_variant_name, rust_field_name, rust_union_variant_name};
 }
 
 /// Parses and validates a single schema source without resolving `#import`s. Syntax errors carry

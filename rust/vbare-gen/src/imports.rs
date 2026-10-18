@@ -2,7 +2,7 @@
 
 use crate::{
     parser::{self, AnyType},
-    validate, Config, SchemaGenerator,
+    codegen, validate, Config, SchemaGenerator,
 };
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -58,6 +58,23 @@ impl SchemaLoader {
             });
         }
         let definitions = generator.complete();
+        Ok(quote! { #(#imports)* #definitions })
+    }
+
+    /// Generate one module with the zero-copy codec. `path` is relative to this loader's schema
+    /// root.
+    pub fn generate_codec(&mut self, path: &Path) -> Result<TokenStream, Error> {
+        let schema = self.resolve(path)?;
+        let definitions = codegen::generate(&schema.local, &schema.registry)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let mut imports = Vec::new();
+        for dependency in schema.dependencies {
+            let ident: syn::Ident = syn::parse_str(&module_name(&dependency)?)?;
+            imports.push(quote! {
+                #[allow(unused_imports)]
+                use super::#ident::*;
+            });
+        }
         Ok(quote! { #(#imports)* #definitions })
     }
 

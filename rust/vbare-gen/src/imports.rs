@@ -1,8 +1,9 @@
 //! Resolve root-relative schema imports once, preserving each type's defining module.
 
 use crate::{
+    codegen,
     parser::{self, AnyType},
-    codegen, validate, Config, SchemaGenerator,
+    validate, Config,
 };
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -22,6 +23,17 @@ struct Schema {
     dependencies: BTreeSet<PathBuf>,
 }
 
+/// A schema file with its imports resolved.
+#[derive(Clone, Debug)]
+pub struct ResolvedSchema {
+    /// Types defined in this file.
+    pub local: BTreeMap<String, AnyType>,
+    /// Every type this file can reference, including `local`.
+    pub registry: BTreeMap<String, AnyType>,
+    /// The file defining each type in `registry`, relative to the schema root.
+    pub origins: BTreeMap<String, PathBuf>,
+}
+
 /// A compiler invocation's schema root and resolved import graph.
 pub struct SchemaLoader {
     root: PathBuf,
@@ -38,32 +50,19 @@ impl SchemaLoader {
         }
     }
 
-    /// Generate one module. `path` is relative to this loader's schema root.
-    pub fn generate(&mut self, path: &Path, _config: Config) -> Result<TokenStream, Error> {
+    /// Parses, resolves and validates one schema file. `path` is relative to this loader's schema
+    /// root.
+    pub fn resolve_schema(&mut self, path: &Path) -> Result<ResolvedSchema, Error> {
         let schema = self.resolve(path)?;
-        let mut generator = SchemaGenerator {
-            global_output: Vec::new(),
-            user_type_registry: schema.registry,
-        };
-        for (name, definition) in &schema.local {
-            generator.gen_user_type(name, definition);
-        }
-        let mut imports = Vec::new();
-        for dependency in schema.dependencies {
-            let name = module_name(&dependency)?;
-            let ident: syn::Ident = syn::parse_str(&name)?;
-            imports.push(quote! {
-                #[allow(unused_imports)]
-                use super::#ident::*;
-            });
-        }
-        let definitions = generator.complete();
-        Ok(quote! { #(#imports)* #definitions })
+        Ok(ResolvedSchema {
+            local: schema.local,
+            registry: schema.registry,
+            origins: schema.origins,
+        })
     }
 
-    /// Generate one module with the zero-copy codec. `path` is relative to this loader's schema
-    /// root.
-    pub fn generate_codec(&mut self, path: &Path) -> Result<TokenStream, Error> {
+    /// Generate one module. `path` is relative to this loader's schema root.
+    pub fn generate(&mut self, path: &Path, _config: Config) -> Result<TokenStream, Error> {
         let schema = self.resolve(path)?;
         let definitions = codegen::generate(&schema.local, &schema.registry)
             .map_err(|error| format!("{}: {error}", path.display()))?;

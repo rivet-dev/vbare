@@ -1,27 +1,105 @@
-use anyhow::*;
-use serde::{Deserialize, Serialize};
-use vbare::OwnedVersionedData;
+//! `Versioned` conversion and framing with hand-written message types.
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct TestDataV1 {
-    id: u32,
-    name: String,
+use anyhow::{bail, Result};
+use vbare::{
+    wire::{self, Wire},
+    Bytes, DecodeError, DecodeErrorKind, Encode, EncodeError, Message, Reader, Sink, Str, Verifier,
+    Versioned,
+};
+
+/// Defines a struct with a hand-written `Wire` implementation, as generated code would.
+macro_rules! message {
+    ($name:ident, $wire:ident { $($field:ident: $field_wire:ty),* $(,)? }) => {
+        #[derive(Clone, Debug, PartialEq)]
+        struct $name {
+            $($field: <$field_wire as Wire>::Owned,)*
+        }
+
+        struct $wire;
+
+        // SAFETY: every reader visits the fields in the order `verify` checks them.
+        unsafe impl Wire for $wire {
+            type Ref<'a> = ($(<$field_wire as Wire>::Ref<'a>,)*);
+            type Owned = $name;
+            type Root = ();
+
+            const FIXED_SIZE: Option<usize> = None;
+            const MIN_SIZE: usize = 1;
+
+            fn verify<'a>(v: &mut Verifier<'a>) -> Result<Self::Ref<'a>, DecodeError> {
+                Ok(($(<$field_wire as Wire>::verify(v)?,)*))
+            }
+
+            fn read<'a>(r: &mut Reader<'a>) -> Self::Ref<'a> {
+                ($(<$field_wire as Wire>::read(r),)*)
+            }
+
+            fn root(_: &Self::Ref<'_>) {}
+
+            fn from_root(r: Reader<'_>, _: ()) -> Self::Ref<'_> {
+                Self::read_span(r)
+            }
+
+            fn read_owned(r: &mut Reader<'_>) -> $name {
+                $name { $($field: <$field_wire as Wire>::read_owned(r),)* }
+            }
+
+            fn encoded_len(value: &$name) -> usize {
+                0 $(+ <$field_wire as Wire>::encoded_len(&value.$field))*
+            }
+
+            fn encode<S: Sink>(value: &$name, out: &mut S) {
+                $(<$field_wire as Wire>::encode(&value.$field, out);)*
+            }
+
+            fn ref_encoded_len(value: Self::Ref<'_>) -> usize {
+                let ($($field,)*) = value;
+                0 $(+ <$field_wire as Wire>::ref_encoded_len($field))*
+            }
+
+            fn encode_ref<S: Sink>(value: Self::Ref<'_>, out: &mut S) {
+                let ($($field,)*) = value;
+                $(<$field_wire as Wire>::encode_ref($field, out);)*
+            }
+        }
+
+        impl Encode for $name {
+            fn encoded_len(&self) -> usize {
+                <$wire as Wire>::encoded_len(self)
+            }
+
+            fn encode<S: Sink>(&self, out: &mut S) {
+                <$wire as Wire>::encode(self, out)
+            }
+        }
+
+        impl Message for $name {
+            type Wire = $wire;
+        }
+    };
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct TestDataV2 {
-    id: u32,
-    name: String,
-    description: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct TestDataV3 {
-    id: u32,
-    name: String,
-    description: String,
-    tags: Vec<String>,
-}
+message!(
+    TestDataV1,
+    TestDataV1Wire {
+        id: wire::U32,
+        name: wire::Str
+    }
+);
+message!(
+    TestDataV2,
+    TestDataV2Wire {
+        id: wire::U32,
+        name: wire::Str,
+        description: wire::Str,
+    }
+);
+message!(TestDataV3, TestDataV3Wire {
+    id: wire::U32,
+    name: wire::Str,
+    description: wire::Str,
+    tags: wire::List<wire::Str>,
+});
 
 #[derive(Clone)]
 enum TestData {
@@ -30,86 +108,40 @@ enum TestData {
     V3(TestDataV3),
 }
 
-impl OwnedVersionedData for TestData {
+impl Versioned for TestData {
     type Latest = TestDataV3;
+
+    const LATEST: u16 = 3;
+    const UPGRADES: &'static [vbare::Converter<Self>] = &[Self::v1_to_v2, Self::v2_to_v3];
+    const DOWNGRADES: &'static [vbare::Converter<Self>] = &[Self::v3_to_v2, Self::v2_to_v1];
 
     fn wrap_latest(latest: TestDataV3) -> Self {
         TestData::V3(latest)
     }
 
-    fn unwrap_latest(self) -> Result<Self::Latest> {
-        #[allow(irrefutable_let_patterns)]
-        if let TestData::V3(data) = self {
-            Ok(data)
-        } else {
-            bail!("version not latest");
-        }
-    }
-
-    fn deserialize_version(payload: &[u8], version: u16) -> Result<Self> {
-        match version {
-            1 => Ok(TestData::V1(serde_bare::from_slice(payload)?)),
-            2 => Ok(TestData::V2(serde_bare::from_slice(payload)?)),
-            3 => Ok(TestData::V3(serde_bare::from_slice(payload)?)),
-            _ => bail!("invalid version: {version}"),
-        }
-    }
-
-    fn serialize_version(self, _version: u16) -> Result<Vec<u8>> {
+    fn unwrap_latest(self) -> Result<TestDataV3> {
         match self {
-            TestData::V1(data) => serde_bare::to_vec(&data).map_err(Into::into),
-            TestData::V2(data) => serde_bare::to_vec(&data).map_err(Into::into),
-            TestData::V3(data) => serde_bare::to_vec(&data).map_err(Into::into),
+            TestData::V3(data) => Ok(data),
+            TestData::V1(_) | TestData::V2(_) => bail!("version not latest"),
         }
     }
 
-    fn deserialize_converters() -> Vec<impl Fn(Self) -> Result<Self>> {
-        vec![Self::v1_to_v2, Self::v2_to_v3]
-    }
-
-    fn serialize_converters() -> Vec<impl Fn(Self) -> Result<Self>> {
-        vec![Self::v3_to_v2, Self::v2_to_v1]
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-struct TestDataNoConvertersV1 {
-    id: u32,
-    name: String,
-}
-
-#[derive(Clone)]
-enum TestDataNoConverters {
-    V1(TestDataNoConvertersV1),
-}
-
-impl OwnedVersionedData for TestDataNoConverters {
-    type Latest = TestDataNoConvertersV1;
-
-    fn wrap_latest(latest: TestDataNoConvertersV1) -> Self {
-        TestDataNoConverters::V1(latest)
-    }
-
-    fn unwrap_latest(self) -> Result<Self::Latest> {
-        #[allow(irrefutable_let_patterns)]
-        if let TestDataNoConverters::V1(data) = self {
-            Ok(data)
-        } else {
-            bail!("version not latest");
-        }
-    }
-
-    fn deserialize_version(payload: &[u8], version: u16) -> Result<Self> {
+    fn decode_version(version: u16, body: Bytes) -> Result<Self, DecodeError> {
         match version {
-            1 => Ok(TestDataNoConverters::V1(serde_bare::from_slice(payload)?)),
-            _ => bail!("invalid version: {version}"),
+            1 => Ok(TestData::V1(TestDataV1::decode(body)?)),
+            2 => Ok(TestData::V2(TestDataV2::decode(body)?)),
+            3 => Ok(TestData::V3(TestDataV3::decode(body)?)),
+            _ => Err(DecodeError::new(DecodeErrorKind::UnsupportedVersion, 0)),
         }
     }
 
-    fn serialize_version(self, _version: u16) -> Result<Vec<u8>> {
+    fn encode_version<S: Sink>(&self, _version: u16, out: &mut S) -> Result<(), EncodeError> {
         match self {
-            TestDataNoConverters::V1(data) => serde_bare::to_vec(&data).map_err(Into::into),
+            TestData::V1(data) => data.encode(out),
+            TestData::V2(data) => data.encode(out),
+            TestData::V3(data) => data.encode(out),
         }
+        Ok(())
     }
 }
 
@@ -119,7 +151,7 @@ impl TestData {
             TestData::V1(v1) => Ok(TestData::V2(TestDataV2 {
                 id: v1.id,
                 name: v1.name,
-                description: "default".to_string(),
+                description: Str::from("default"),
             })),
             other => Ok(other),
         }
@@ -131,7 +163,7 @@ impl TestData {
                 id: v2.id,
                 name: v2.name,
                 description: v2.description,
-                tags: vec![],
+                tags: Vec::new(),
             })),
             other => Ok(other),
         }
@@ -159,198 +191,159 @@ impl TestData {
     }
 }
 
-#[test]
-fn test_v2_to_v1_to_v2() {
-    let data = TestDataV2 {
-        id: 456,
-        name: "test".to_string(),
-        description: "will be stripped".to_string(),
-    };
-
-    let payload = TestData::V2(data.clone()).serialize(1).unwrap();
-
-    let deserialized = TestData::deserialize(&payload, 1).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "test");
-    assert_eq!(deserialized.description, "default");
+/// A single-version family with no converters.
+#[derive(Clone)]
+enum OnlyV1 {
+    V1(TestDataV1),
 }
 
-#[test]
-fn test_v2_to_v2() {
-    let data = TestDataV2 {
-        id: 456,
-        name: "test".to_string(),
-        description: "data".to_string(),
-    };
+impl Versioned for OnlyV1 {
+    type Latest = TestDataV1;
 
-    let payload = TestData::V2(data.clone()).serialize(2).unwrap();
+    const LATEST: u16 = 1;
 
-    // V2 data deserialized with version 2 will be converted to V3 (latest)
-    let deserialized = TestData::deserialize(&payload, 2).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "test");
-    assert_eq!(deserialized.description, "data");
-    assert_eq!(deserialized.tags.len(), 0); // Tags default to empty vec
+    fn wrap_latest(latest: TestDataV1) -> Self {
+        OnlyV1::V1(latest)
+    }
+
+    fn unwrap_latest(self) -> Result<TestDataV1> {
+        match self {
+            OnlyV1::V1(data) => Ok(data),
+        }
+    }
+
+    fn decode_version(version: u16, _body: Bytes) -> Result<Self, DecodeError> {
+        Err(DecodeError::with_detail(
+            DecodeErrorKind::UnsupportedVersion,
+            0,
+            format!("version {version}"),
+        ))
+    }
+
+    fn encode_version<S: Sink>(&self, _version: u16, out: &mut S) -> Result<(), EncodeError> {
+        match self {
+            OnlyV1::V1(data) => data.encode(out),
+        }
+        Ok(())
+    }
 }
 
-#[test]
-fn test_unsupported_version() {
-    assert!(TestData::deserialize(&[], 99).is_err());
-}
-
-#[test]
-fn test_v3_to_v2() {
-    // This is the critical test case: serializing from V3 to V2
-    // With 3 versions and 2 serialize converters (V3->V2, V2->V1),
-    // serializing to version 2 should apply 1 converter (V3->V2)
-    let data = TestDataV3 {
-        id: 789,
-        name: "v3_test".to_string(),
-        description: "test description".to_string(),
-        tags: vec!["tag1".to_string(), "tag2".to_string()],
-    };
-
-    // Serialize V3 data to V2 format (should strip tags)
-    let payload = TestData::V3(data.clone()).serialize(2).unwrap();
-
-    // Deserialize as V2 and verify tags were stripped
-    let deserialized = TestData::deserialize(&payload, 2).unwrap();
-    assert_eq!(deserialized.id, 789);
-    assert_eq!(deserialized.name, "v3_test");
-    assert_eq!(deserialized.description, "test description");
-    // Tags should not be present in V2
-}
-
-#[test]
-fn test_v3_to_v1() {
-    // Test serializing from V3 all the way down to V1
-    // Should apply both converters: V3->V2, then V2->V1
-    let data = TestDataV3 {
+fn latest() -> TestDataV3 {
+    TestDataV3 {
         id: 999,
-        name: "v3_to_v1_test".to_string(),
-        description: "should be stripped".to_string(),
-        tags: vec!["will be removed".to_string()],
-    };
+        name: "v3".into(),
+        description: "described".into(),
+        tags: vec!["a".into(), "b".into()],
+    }
+}
 
-    // Serialize V3 data to V1 format
-    let payload = TestData::V3(data.clone()).serialize(1).unwrap();
-
-    // Deserialize as V1 and verify both description and tags were stripped
-    let deserialized = TestData::deserialize(&payload, 1).unwrap();
-    assert_eq!(deserialized.id, 999);
-    assert_eq!(deserialized.name, "v3_to_v1_test");
-    assert_eq!(deserialized.description, "default");
-    assert_eq!(deserialized.tags.len(), 0);
+fn sealed(value: &TestDataV3, version: u16) -> Bytes {
+    Bytes::from(TestData::seal_to_vec(value, version).unwrap())
 }
 
 #[test]
-fn test_v3_to_v3() {
-    // Test that serializing V3 to V3 preserves all data
-    let data = TestDataV3 {
-        id: 123,
-        name: "v3_same".to_string(),
-        description: "preserved".to_string(),
-        tags: vec!["keep".to_string()],
-    };
-
-    let payload = TestData::V3(data.clone()).serialize(3).unwrap();
-
-    let deserialized = TestData::deserialize(&payload, 3).unwrap();
-    assert_eq!(deserialized.id, 123);
-    assert_eq!(deserialized.name, "v3_same");
-    assert_eq!(deserialized.description, "preserved");
-    assert_eq!(deserialized.tags, vec!["keep".to_string()]);
-}
-
-#[test]
-fn test_serialize() {
-    let data = TestData::V3(TestDataV3 {
+fn upgrades_older_bodies() {
+    let v1 = TestDataV1 {
         id: 456,
-        name: "serialize_test".to_string(),
-        description: "will be stripped".to_string(),
-        tags: vec!["tag1".to_string()],
-    });
+        name: "test".into(),
+    };
+    let decoded = TestData::decode_body(v1.encode_to_bytes(), 1).unwrap();
+    assert_eq!(decoded.id, 456);
+    assert_eq!(decoded.name, "test");
+    assert_eq!(decoded.description, "default");
+    assert!(decoded.tags.is_empty());
 
-    // Test serializing to V1 (should convert V3 -> V2 -> V1)
-    let result = data.clone().serialize(1).unwrap();
-    let deserialized: TestDataV1 = serde_bare::from_slice(&result).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "serialize_test");
-
-    // Test serializing to V2 (should convert V3 -> V2)
-    let result = data.clone().serialize(2).unwrap();
-    let deserialized: TestDataV2 = serde_bare::from_slice(&result).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "serialize_test");
-    assert_eq!(deserialized.description, "will be stripped");
-
-    // Test serializing to V3 (no conversion)
-    let result = data.serialize(3).unwrap();
-    let deserialized: TestDataV3 = serde_bare::from_slice(&result).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "serialize_test");
-    assert_eq!(deserialized.description, "will be stripped");
-    assert_eq!(deserialized.tags, vec!["tag1".to_string()]);
+    let v2 = TestDataV2 {
+        id: 1,
+        name: "n".into(),
+        description: "kept".into(),
+    };
+    let decoded = TestData::decode_body(v2.encode_to_bytes(), 2).unwrap();
+    assert_eq!(decoded.description, "kept");
 }
 
 #[test]
-fn test_embedded_v2_to_v1_to_v2() {
-    let data = TestDataV2 {
-        id: 456,
-        name: "test".to_string(),
-        description: "will be stripped".to_string(),
-    };
+fn downgrades_when_encoding_older_versions() {
+    let value = latest();
+    let mut v2 = Vec::new();
+    TestData::encode_body(&value, 2, &mut v2).unwrap();
+    let decoded = TestDataV2::decode(Bytes::from(v2)).unwrap();
+    assert_eq!(decoded.description, "described");
 
-    let payload = TestData::V2(data.clone())
-        .serialize_with_embedded_version(1)
-        .unwrap();
-
-    // First 2 bytes should be the version (1 in little-endian)
-    assert_eq!(payload[0], 1u8);
-    assert_eq!(payload[1], 0u8);
-
-    // Deserializing V1 data converts it to V3 (latest)
-    let deserialized = TestData::deserialize_with_embedded_version(&payload).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "test");
-    assert_eq!(deserialized.description, "default");
-    assert_eq!(deserialized.tags.len(), 0);
+    let mut v1 = Vec::new();
+    TestData::encode_body(&value, 1, &mut v1).unwrap();
+    let decoded = TestDataV1::decode(Bytes::from(v1)).unwrap();
+    assert_eq!(decoded.id, 999);
+    assert_eq!(decoded.name, "v3");
 }
 
 #[test]
-fn test_embedded_v2_to_v2() {
-    let data = TestDataV2 {
-        id: 456,
-        name: "test".to_string(),
-        description: "data".to_string(),
-    };
-
-    let payload = TestData::V2(data.clone())
-        .serialize_with_embedded_version(2)
-        .unwrap();
-
-    // First 2 bytes should be the version (2 in little-endian)
-    assert_eq!(payload[0], 2u8);
-    assert_eq!(payload[1], 0u8);
-
-    // Deserializing V2 data converts it to V3 (latest)
-    let deserialized = TestData::deserialize_with_embedded_version(&payload).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "test");
-    assert_eq!(deserialized.description, "data");
-    assert_eq!(deserialized.tags.len(), 0);
+fn round_trips_every_version_with_header() {
+    let value = latest();
+    for version in 1..=3u16 {
+        let bytes = sealed(&value, version);
+        assert_eq!(bytes[..2], version.to_le_bytes());
+        let decoded = TestData::decode(bytes.clone()).unwrap();
+        assert_eq!(decoded.id, 999);
+        assert_eq!(decoded.name, "v3");
+        let opened = TestData::open(bytes).unwrap();
+        assert_eq!(opened.to_owned(), decoded);
+    }
+    let decoded = TestData::decode(sealed(&value, 3)).unwrap();
+    assert_eq!(decoded, value);
 }
 
 #[test]
-fn test_no_converters() {
-    let data = TestDataNoConvertersV1 {
-        id: 456,
-        name: "test".to_string(),
+fn latest_payloads_open_without_copying() {
+    let bytes = sealed(&latest(), 3);
+    let view = TestData::open(bytes.clone()).unwrap();
+    assert_eq!(view.as_bytes().as_ptr(), bytes[2..].as_ptr());
+    let (id, name, _, tags) = view.get();
+    assert_eq!(id, 999);
+    assert_eq!(name, "v3");
+    assert_eq!(tags.iter().collect::<Vec<_>>(), ["a", "b"]);
+}
+
+#[test]
+fn header_matches_vbare_0_1() {
+    // vbare 0.1 wrote the version as a little-endian u16 before the body.
+    let value = TestDataV1 {
+        id: 1,
+        name: "x".into(),
     };
+    let bytes = OnlyV1::seal_to_vec(&value, 1).unwrap();
+    assert_eq!(bytes, [1, 0, 1, 0, 0, 0, 1, b'x']);
+}
 
-    let payload = TestDataNoConverters::V1(data.clone()).serialize(1).unwrap();
+#[test]
+fn rejects_unsupported_versions() {
+    let value = latest();
+    for version in [0u16, 4, 99] {
+        let mut body = 3u32.to_le_bytes().to_vec();
+        body.splice(0..0, version.to_le_bytes());
+        let error = TestData::decode(Bytes::from(body)).unwrap_err();
+        assert_eq!(error.kind(), DecodeErrorKind::UnsupportedVersion);
+        assert!(matches!(
+            TestData::seal_to_vec(&value, version),
+            Err(EncodeError::UnsupportedVersion(_))
+        ));
+    }
+    let error = TestData::decode(Bytes::from_static(&[1])).unwrap_err();
+    assert_eq!(error.kind(), DecodeErrorKind::Truncated);
+}
 
-    let deserialized = TestDataNoConverters::deserialize(&payload, 1).unwrap();
-    assert_eq!(deserialized.id, 456);
-    assert_eq!(deserialized.name, "test");
+#[test]
+fn no_converters() {
+    let value = TestDataV1 {
+        id: 7,
+        name: "only".into(),
+    };
+    let bytes = Bytes::from(OnlyV1::seal_to_vec(&value, 1).unwrap());
+    assert_eq!(OnlyV1::decode(bytes).unwrap(), value);
+    assert_eq!(
+        OnlyV1::decode(Bytes::from_static(&[2, 0]))
+            .unwrap_err()
+            .kind(),
+        DecodeErrorKind::UnsupportedVersion
+    );
 }

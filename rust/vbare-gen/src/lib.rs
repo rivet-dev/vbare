@@ -1,104 +1,64 @@
 /*!
-`bare_gen` provides a simple function that generates Rust types from BARE schema files.
-Generated types implicitly implement `serde::Serialize` and `serde::Deserialize`, as `serde_bare`
-is used to handle encoding and decoding. Please see
-[serde_bare's documentation](https://docs.rs/serde_bare/latest/serde_bare/) for information on how
-the Rust data model maps to the BARE data model.
+`vbare-gen` generates Rust types and a zero-copy BARE codec from schema files. Build scripts
+usually call it through `vbare-compiler`. Generated code depends only on the `vbare` runtime.
 
-To use this macro, define a BARE schema file and populate it with type declarations.
-
-For example:
-
+For a schema such as
 
 ```bare
-// schema.bare
-type PublicKey data[128]
-type Time str # ISO 8601
-
-type Department enum {
-  ACCOUNTING
-  ADMINISTRATION
-  CUSTOMER_SERVICE
-  DEVELOPMENT
-
-  # Reserved for the CEO
-  JSMITH = 99
-}
-
-type Address list<str>[4] # street, city, state, country
-
 type Customer struct {
   name: str
-  email: str
-  address: Address
   orders: list<struct {
     orderId: i64
     quantity: i32
   }>
   metadata: map<str><data>
 }
-
-type Employee struct {
-  name: str
-  email: str
-  address: Address
-  department: Department
-  hireDate: Time
-  publicKey: optional<PublicKey>
-  metadata: map<str><data>
-}
-
-type TerminatedEmployee void
-
-type Person union {Customer | Employee | TerminatedEmployee}
 ```
 
-Then, within a Rust source file:
+every user type `Foo` produces four items:
 
-```ignore
+- `Foo`, the owned type for building, storing and encoding values;
+- `FooRef<'a>`, a borrowed view whose accessors read fields in place from a verified buffer;
+- `FooWire`, the marker type implementing `vbare::Wire` (verification, reads and encoding);
+- `FooView`, an alias for `vbare::View<FooWire>`, which owns a verified buffer.
 
-bare_gen::bare_schema("schema.bare", bare_gen::Config::default()); // TokenStream
+Structs, unions and enums also implement `vbare::Message` (`Foo::view`, `Foo::decode`) and
+`vbare::Encode`.
 
-```
+# BARE to Rust mapping
 
-# BARE => Rust Data Mapping
+| BARE | Owned | Borrowed |
+|---|---|---|
+| `uint`, `int` | `u64`, `i64` | same |
+| `u8` .. `i64`, `f32`, `f64`, `bool` | same | same |
+| `str` | `vbare::Str` | `&'a str` |
+| `data` | `vbare::Bytes` | `&'a [u8]` |
+| `data[N]` | `[u8; N]` up to 32, `vbare::FixedBytes<N>` above | `&'a [u8; N]` |
+| `optional<T>` | `Option<T>` | `Option<TRef>` |
+| `list<T>` | `Vec<T>` | `vbare::ListRef` |
+| `list<T>[N]` | `[T; N]` | `vbare::ListRef` |
+| `map<K><V>` | `BTreeMap<K, V>`, encoded in key order | `vbare::MapRef` |
+| `enum` | generated `Copy` enum | same |
+| `union` | generated enum | generated enum of borrowed members |
+| `struct` | generated struct | generated view struct |
 
-In most areas, the BARE data model maps cleanly to a Rust representation. Unless otherwise
-specified, the most obvious Rust data type is generated from a given BARE type. For example,
-a BARE `option<type>` is mapped to Rust's `Option<type>`, BARE unions and enums are mapped to
-Rust `enum`s. See below for opinions that this crate has around data types that do not map
-as cleanly or require additional explanation.
+Decoded `Str`, `Bytes` and `FixedBytes` values share the input buffer instead of copying it.
+Field names become snake_case and enum values UpperCamelCase. Anonymous structs, unions and enums
+are named after where they appear: `orders` above becomes `CustomerOrders`, and union member `i`
+of `Foo` becomes `FooMember{i}`.
 
-## Maps
-
-BARE maps are interpreted as `std::collections::HashMap<K, V>` in Rust by default.
-## Variable Length Integers
-
-The variable `uint` and `int` types are mapped to [`serde_bare::UInt`] and [`serde_bare::Int`]
-respectively. These types wrap `u64` and `i64` (the largest possible sized values stored in BARE
-variable length integers).
-
-Arrays that have 32 or less elements are mapped directly as Rust arrays, while BARE arrays with
-more than 32 elements are converted into `Vec<T>`.
-
-## Byte Arrays
-
-BARE `data` maps to `Vec<u8>`, except for fixed-size `data[N]` with 32 or fewer bytes, which maps to
-`[u8; N]`. Serde encodes a plain `Vec<u8>` one element at a time, so `Vec<u8>` fields are generated
-with `#[serde(with = "serde_bytes")]`, which routes them through serde_bare's bulk byte handling
-instead. This is roughly 9 times faster for large payloads and produces identical encoded bytes.
-
-Crates that include generated code therefore need a `serde_bytes` dependency. Fields holding nested
-byte arrays, such as `list<data>`, are not annotated, because `serde_bytes` does not support them.
-
+Explicit enum values and union tags (`A = 5`) follow draft-devault-bare-11: unassigned values
+continue from the previous value plus one. Schemas are validated against the spec's invariants
+before generation.
 */
 
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
-use parser::{AnyType, PrimitiveType, StructField};
-use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use parser::AnyType;
+use proc_macro2::TokenStream;
 
 mod codegen;
 mod imports;
@@ -108,7 +68,7 @@ mod imports;
 #[path = "bare_proc/parser.rs"]
 mod parser;
 mod validate;
-pub use imports::{module_name, SchemaLoader};
+pub use imports::{module_name, ResolvedSchema, SchemaLoader};
 
 /// The parsed schema representation produced by the vendored parser.
 pub mod ast {
@@ -130,415 +90,21 @@ pub fn parse_schema(source: &str) -> Result<BTreeMap<String, AnyType>, String> {
     Ok(schema)
 }
 
-/// Configuration for `bare_schema` code generation.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Configuration for code generation. There are no options yet.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[non_exhaustive]
 pub struct Config {}
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {}
-    }
-}
-
-fn ident_from_string(s: &String) -> Ident {
-    Ident::new(s, Span::call_site())
-}
-
-#[derive(Clone, Copy)]
-struct Caps {
-    eq: bool,
-    hash: bool,
-}
-
-impl Caps {
-    const ALL: Caps = Caps {
-        eq: true,
-        hash: true,
-    };
-    const NONE: Caps = Caps {
-        eq: false,
-        hash: false,
-    };
-    fn and(self, other: Caps) -> Caps {
-        Caps {
-            eq: self.eq && other.eq,
-            hash: self.hash && other.hash,
-        }
-    }
-    fn derive_tokens(self) -> TokenStream {
-        match (self.eq, self.hash) {
-            (true, true) => quote! { , Eq, Hash },
-            (true, false) => quote! { , Eq },
-            (false, true) => quote! { , Hash },
-            (false, false) => quote! {},
-        }
-    }
-}
-
-/// `bare_schema` parses a BARE schema file and generates equivalent Rust code that is capable of
-/// being serialized to and deserialized from bytes using the BARE encoding format. The macro takes
-/// exactly one argument, a string that will be parsed as path pointing to a BARE schema file. The
-/// path is treated as relative to the file location of the macro's use.
-/// For details on how the BARE data model maps to the Rust data model, see the [`Serialize`
-/// derive macro's documentation.](https://docs.rs/serde_bare/latest/serde_bare/)
-pub fn bare_schema(schema_path: &Path, config: Config) -> proc_macro2::TokenStream {
+/// Generates Rust code for the schema at `schema_path`. Imports resolve relative to the schema's
+/// directory.
+pub fn bare_schema(
+    schema_path: &Path,
+    config: Config,
+) -> Result<TokenStream, Box<dyn std::error::Error>> {
     let root = schema_path.parent().unwrap_or_else(|| Path::new("."));
-    let name = schema_path.file_name().expect("schema file name");
-    SchemaLoader::new(root)
-        .generate(Path::new(name), config)
-        .unwrap_or_else(|error| panic!("{error}"))
-}
-
-struct SchemaGenerator {
-    global_output: Vec<TokenStream>,
-    user_type_registry: BTreeMap<String, AnyType>,
-}
-
-impl SchemaGenerator {
-    /// Completes a generation cycle by consuming the `SchemaGenerator` and yielding a
-    /// `TokenStream`.
-    fn complete(self) -> TokenStream {
-        let SchemaGenerator { global_output, .. } = self;
-        quote! {
-            #[allow(unused_imports)]
-            use serde::{Serialize, Deserialize};
-            #[allow(unused_imports)]
-            use serde_bare::{Uint, Int};
-
-            #(#global_output)*
-        }
-    }
-
-    /// `gen_user_type` is responsible for generating the token streams of a single user type at a top
-    /// level. Rust does not support anonymous structs/enums/etc., so we must recursively parse any
-    /// anonymous definitions and generate top-level definitions. As such, this function may generate
-    /// multiple types.
-    fn gen_user_type(&mut self, name: &String, t: &AnyType) {
-        #[allow(unused_assignments)]
-        use AnyType::*;
-        let def = match t {
-            Primitive(p) => {
-                let def = gen_primative_type_def(p);
-                let ident = ident_from_string(name);
-                quote! {
-                    pub type #ident = #def;
-                }
-            }
-            List { inner, length } => {
-                let def = self.gen_list(name, inner.as_ref(), length);
-                let ident = ident_from_string(name);
-                quote! {
-                    pub type #ident = #def;
-                }
-            }
-            Struct(fields) => {
-                self.gen_struct(name, fields);
-                // `gen_struct` only has side-effects on the registry, so we return nothing
-                TokenStream::new()
-            }
-            Map { key, value } => {
-                let map_def = self.gen_map(name, key.as_ref(), value.as_ref());
-                let ident = ident_from_string(name);
-                quote! {
-                    pub type #ident = #map_def;
-                }
-            }
-            Optional(inner) => {
-                let inner_def = self.dispatch_type(name, inner);
-                let ident = ident_from_string(name);
-                quote! {
-                    pub type #ident = #inner_def;
-                }
-            }
-            TypeReference(reference) => {
-                panic!("Type reference is not valid as a top level definition: {reference}")
-            }
-            Enum(members) => {
-                self.gen_enum(name, members);
-                // `gen_enum` only has side-effects on the registry, so we return nothing
-                TokenStream::new()
-            }
-            Union(members) => {
-                self.gen_union(name, members);
-                // `gen_union` only has side-effects on the registry, so we return nothing
-                TokenStream::new()
-            }
-        };
-        self.global_output.push(def);
-    }
-
-    fn caps_of(&self, t: &AnyType) -> Caps {
-        match t {
-            AnyType::Primitive(p) => match p {
-                PrimitiveType::F32 | PrimitiveType::F64 => Caps::NONE,
-                PrimitiveType::UInt | PrimitiveType::Int => Caps {
-                    eq: true,
-                    hash: false,
-                },
-                _ => Caps::ALL,
-            },
-            AnyType::List { inner, .. } => self.caps_of(inner),
-            AnyType::Optional(inner) => self.caps_of(inner),
-            AnyType::Map { key, value } => Caps {
-                eq: self.caps_of(key).eq && self.caps_of(value).eq,
-                hash: false,
-            },
-            AnyType::Struct(fields) => fields
-                .iter()
-                .map(|f| self.caps_of(&f.type_r))
-                .fold(Caps::ALL, Caps::and),
-            AnyType::Union(members) => members
-                .iter()
-                .map(|(m, _)| self.caps_of(m))
-                .fold(Caps::ALL, Caps::and),
-            AnyType::Enum(_) => Caps::ALL,
-            AnyType::TypeReference(name) => match self.user_type_registry.get(name) {
-                Some(t) => self.caps_of(t),
-                None => Caps::ALL,
-            },
-        }
-    }
-
-    /// Reports whether a type is a BARE `data` field that maps to `Vec<u8>`, following type aliases
-    /// and looking through `optional<...>`. Serde encodes a plain `Vec<u8>` one element at a time,
-    /// so these fields are annotated with `serde_bytes` to reach serde_bare's bulk `serialize_bytes`
-    /// and `deserialize_byte_buf` paths. Both spellings produce identical bytes.
-    fn is_bytes_type(&self, t: &AnyType) -> bool {
-        match t {
-            AnyType::Primitive(PrimitiveType::Data(size)) => match size {
-                // Small fixed-size data maps to `[u8; N]`, which serde_bytes does not support.
-                Some(size) => *size > MAX_INLINE_DATA_LEN,
-                None => true,
-            },
-            AnyType::Optional(inner) => self.is_bytes_type(inner),
-            AnyType::TypeReference(name) => match self.user_type_registry.get(name) {
-                Some(t) => self.is_bytes_type(t),
-                None => false,
-            },
-            AnyType::Primitive(_)
-            | AnyType::List { .. }
-            | AnyType::Struct(_)
-            | AnyType::Enum(_)
-            | AnyType::Map { .. }
-            | AnyType::Union(_) => false,
-        }
-    }
-
-    fn dispatch_type(&mut self, name: &String, any_type: &AnyType) -> TokenStream {
-        match any_type {
-            AnyType::Primitive(p) => gen_primative_type_def(p),
-            AnyType::List { inner, length } => self.gen_list(name, inner.as_ref(), length),
-            AnyType::Struct(fields) => self.gen_struct(name, fields),
-            AnyType::Enum(members) => self.gen_enum(name, members),
-            AnyType::Map { key, value } => self.gen_map(name, key.as_ref(), value.as_ref()),
-            AnyType::Union(members) => self.gen_union(name, members),
-            AnyType::Optional(inner) => self.gen_option(name, inner),
-            AnyType::TypeReference(i) => {
-                let ident = ident_from_string(i);
-                quote! { #ident }
-            }
-        }
-    }
-
-    fn gen_map(&mut self, name: &String, key: &AnyType, value: &AnyType) -> TokenStream {
-        let key_def = self.dispatch_type(name, key);
-        let val_def = self.dispatch_type(name, value);
-        quote! {
-            std::collections::HashMap<#key_def, #val_def>
-        }
-    }
-
-    fn gen_list(
-        &mut self,
-        name: &String,
-        inner_type: &AnyType,
-        size: &Option<usize>,
-    ) -> TokenStream {
-        let inner_def = self.dispatch_type(name, inner_type);
-        match *size {
-            Some(size) if size <= 32 => quote! {
-                [#inner_def; #size]
-            },
-            _ => quote! {
-                Vec<#inner_def>
-            },
-        }
-    }
-
-    fn gen_struct(&mut self, name: &String, fields: &Vec<StructField>) -> TokenStream {
-        let extra = fields
-            .iter()
-            .map(|f| self.caps_of(&f.type_r))
-            .fold(Caps::ALL, Caps::and)
-            .derive_tokens();
-        // clone so we can safely drain this
-        let fields_clone = fields.clone();
-        let fields_gen = self.gen_struct_field(name, fields_clone);
-        self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Debug, Clone #extra)]
-                pub struct #ident {
-                    #(#fields_gen),*
-                }
-            }
-        })
-    }
-
-    fn gen_union(&mut self, name: &String, members: &Vec<(AnyType, u64)>) -> TokenStream {
-        let mut members_def: Vec<TokenStream> = Vec::with_capacity(members.len());
-        for (i, (member, _)) in members.iter().enumerate() {
-            // If this member is a user type alias for void, we'll not generate an inner type later
-            let is_void_type = match member {
-                AnyType::TypeReference(i) if self.user_type_registry.get(i).is_some() => {
-                    let reference = self.user_type_registry.get(i).unwrap();
-                    matches!(reference, AnyType::Primitive(PrimitiveType::Void))
-                }
-                _ => false,
-            };
-
-            // This is to allow the `registry` binding to not shadow the function arg, but instead
-            // rebind it as it's used in the subsequent `gen_anonymous` call. We'll get move errors if
-            // we don't do it this way.
-            #[allow(unused_assignments)]
-            let mut member_def = TokenStream::new();
-            member_def = match member {
-                AnyType::Struct(fields) => {
-                    let fields_defs = self.gen_struct_field(name, fields.clone());
-                    quote! {
-                        {
-                            #(#fields_defs),*
-                        }
-                    }
-                }
-                AnyType::TypeReference(i) if is_void_type => {
-                    let inner_def = ident_from_string(i);
-                    // The `inner_def` is always a top-level type here
-                    quote! {
-                        #inner_def
-                    }
-                }
-                _ => {
-                    let bytes_attr = if self.is_bytes_type(member) {
-                        quote! { #[serde(with = "serde_bytes")] }
-                    } else {
-                        quote! {}
-                    };
-                    let inner_def = self.dispatch_type(&format!("{name}Member{i}"), member);
-                    // The `inner_def` is always a top-level type here
-                    quote! {
-                        #bytes_attr
-                        #inner_def(#inner_def)
-                    }
-                }
-            };
-            members_def.push(member_def);
-        }
-        let extra = members
-            .iter()
-            .map(|(m, _)| self.caps_of(m))
-            .fold(Caps::ALL, Caps::and)
-            .derive_tokens();
-        self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Debug, Clone #extra)]
-                pub enum #ident {
-                    #(#members_def),*
-                }
-            }
-        })
-    }
-
-    fn gen_option(&mut self, name: &String, inner: &AnyType) -> TokenStream {
-        let inner_def = self.dispatch_type(name, inner);
-        quote! {
-           Option<#inner_def>
-        }
-    }
-
-    fn gen_struct_field(
-        &mut self,
-        struct_name: &String,
-        fields: Vec<StructField>,
-    ) -> Vec<TokenStream> {
-        let mut fields_gen: Vec<TokenStream> = Vec::with_capacity(fields.len());
-        for StructField { name, type_r } in fields {
-            let name = name.to_snake_case();
-            let bytes_attr = if self.is_bytes_type(&type_r) {
-                quote! { #[serde(with = "serde_bytes")] }
-            } else {
-                quote! {}
-            };
-            #[allow(unused_assignments)]
-            let field_gen = self.dispatch_type(&format!("{struct_name}{name}"), &type_r);
-            let ident = ident_from_string(&name);
-            fields_gen.push(quote! {
-                #bytes_attr
-                pub #ident: #field_gen
-            })
-        }
-        fields_gen
-    }
-
-    /// serde encodes unit variants by index, so explicit values are not reflected here.
-    fn gen_enum(&mut self, name: &String, members: &Vec<(String, u64)>) -> TokenStream {
-        let member_defs = members.iter().map(|(name, _)| {
-            let ident = ident_from_string(&name.to_upper_camel_case());
-            quote! {
-                #ident
-            }
-        });
-        self.gen_anonymous(name, |ident| {
-            quote! {
-                #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Debug, PartialOrd, Clone)]
-                #[repr(usize)]
-                pub enum #ident {
-                    #(#member_defs),*
-                }
-            }
-        })
-    }
-
-    /// `gen_anonymous` generates an identifier from the provided `name`, passed it to `inner`, pushes
-    /// the result of `inner` to the `registry`, and yields a quoted version of the generated
-    /// identifier. This is a common operation when generating types that are anonymous in a BARE
-    /// schema but not allowed by be defined anonymously in Rust.
-    fn gen_anonymous(
-        &mut self,
-        name: &String,
-        inner: impl FnOnce(Ident) -> TokenStream,
-    ) -> TokenStream {
-        let ident = ident_from_string(name);
-        self.global_output.push(inner(ident.clone()));
-        quote! {
-            #ident
-        }
-    }
-}
-
-/// Fixed-size `data` up to this length maps to a Rust array, anything longer maps to `Vec<u8>`.
-const MAX_INLINE_DATA_LEN: usize = 32;
-
-fn gen_primative_type_def(p: &PrimitiveType) -> TokenStream {
-    use PrimitiveType::*;
-    match p {
-        UInt => quote! { Uint },
-        U64 => quote! { u64 },
-        U32 => quote! { u32 },
-        U16 => quote! { u16 },
-        U8 => quote! { u8 },
-        Int => quote! { Int },
-        I64 => quote! { i64 },
-        I32 => quote! { i32 },
-        I16 => quote! { i16 },
-        I8 => quote! { i8 },
-        F64 => quote! { f64 },
-        F32 => quote! { f32 },
-        Str => quote! { String },
-        Data(s) => match s {
-            Some(size) if *size <= MAX_INLINE_DATA_LEN => quote! { [u8; #size] },
-            _ => quote! { Vec<u8> },
-        },
-        Void => quote! { () },
-        Bool => quote! { bool },
-    }
+    let name = schema_path
+        .file_name()
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("schema path has no file name: {}", schema_path.display()))?;
+    SchemaLoader::new(root).generate(&name, config)
 }

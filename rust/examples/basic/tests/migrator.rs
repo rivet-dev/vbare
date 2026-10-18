@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use basic::{schemas, AppVersioned};
-use vbare::OwnedVersionedData;
+use basic::{migrate_to_latest, schemas, AppVersioned};
+use vbare::{Encode, Message, Versioned};
 
 #[test]
 fn migrates_v1_to_v3() {
@@ -20,8 +20,7 @@ fn migrates_v1_to_v3() {
         ],
     };
 
-    let bytes = serde_bare::to_vec(&app_v1).unwrap();
-    let migrated = AppVersioned::deserialize(&bytes, 1).unwrap();
+    let migrated = migrate_to_latest(app_v1.encode_to_bytes(), 1).unwrap();
 
     assert_eq!(migrated.todos.len(), 2);
     let done = migrated.todos.get(&2).unwrap();
@@ -30,7 +29,7 @@ fn migrates_v1_to_v3() {
 
 #[test]
 fn migrates_v2_to_v3_with_tags() {
-    let mut todos: HashMap<schemas::v2::TodoId, schemas::v2::Todo> = HashMap::new();
+    let mut todos = BTreeMap::new();
     todos.insert(
         5,
         schemas::v2::Todo {
@@ -43,10 +42,9 @@ fn migrates_v2_to_v3_with_tags() {
     );
     let app_v2 = schemas::v2::App {
         todos,
-        settings: HashMap::new(),
+        settings: BTreeMap::new(),
     };
-    let bytes = serde_bare::to_vec(&app_v2).unwrap();
-    let migrated = AppVersioned::deserialize(&bytes, 2).unwrap();
+    let migrated = migrate_to_latest(app_v2.encode_to_bytes(), 2).unwrap();
 
     let t = migrated.todos.get(&5).unwrap();
     assert_eq!(t.detail.title, "with-tags");
@@ -56,8 +54,7 @@ fn migrates_v2_to_v3_with_tags() {
 
 #[test]
 fn serializes_v3_to_v1() {
-    // Build a minimal v3::App with one DONE todo
-    let mut todos: HashMap<schemas::v3::TodoId, schemas::v3::Todo> = HashMap::new();
+    let mut todos = BTreeMap::new();
     todos.insert(
         7,
         schemas::v3::Todo {
@@ -72,7 +69,7 @@ fn serializes_v3_to_v1() {
             },
             detail: schemas::v3::TodoDetail {
                 title: "hello".into(),
-                tags: HashMap::new(),
+                tags: BTreeMap::new(),
             },
             history: Vec::new(),
         },
@@ -82,19 +79,37 @@ fn serializes_v3_to_v1() {
         todos,
         config: schemas::v3::AppConfig {
             theme: schemas::v3::Theme::System,
-            features: HashMap::new(),
+            features: BTreeMap::new(),
         },
-        boards: HashMap::new(),
+        boards: BTreeMap::new(),
     };
 
-    // Serialize to version 1 using the migrator's serialize path
-    let bytes = AppVersioned::V3(app_v3).serialize(1).unwrap();
+    // Seal at version 1, which runs the down-converters.
+    let bytes = AppVersioned::seal_to_vec(&app_v3, 1).unwrap();
+    assert_eq!(bytes[..2], [1, 0]);
 
-    // Decode as v1::App and assert down-conversion
-    let app_v1: schemas::v1::App = serde_bare::from_slice(&bytes).unwrap();
+    let app_v1 = schemas::v1::App::decode(bytes[2..].to_vec().into()).unwrap();
     assert_eq!(app_v1.todos.len(), 1);
     let t = &app_v1.todos[0];
     assert_eq!(t.id, 7u32);
     assert_eq!(t.title, "hello");
     assert!(t.done);
+}
+
+#[test]
+fn opens_latest_payloads_in_place() {
+    let app = schemas::v3::App {
+        todos: BTreeMap::new(),
+        config: schemas::v3::AppConfig {
+            theme: schemas::v3::Theme::Dark,
+            features: BTreeMap::from([("beta".into(), true)]),
+        },
+        boards: BTreeMap::new(),
+    };
+    let bytes = AppVersioned::seal_to_vec(&app, 3).unwrap();
+    let view = AppVersioned::open(bytes.into()).unwrap();
+    let config = view.get().config();
+    assert_eq!(config.theme(), schemas::v3::Theme::Dark);
+    assert_eq!(config.features().get("beta"), Some(true));
+    assert_eq!(view.to_owned(), app);
 }

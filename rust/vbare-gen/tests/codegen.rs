@@ -8,7 +8,7 @@ fn generate(schema: &str) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("schema.v1.bare"), schema).unwrap();
     let tokens = SchemaLoader::new(dir.path())
-        .generate_codec(Path::new("schema.v1.bare"))
+        .generate(Path::new("schema.v1.bare"), Default::default())
         .map_err(|error| error.to_string())?;
     let file: syn::File = syn::parse2(tokens).map_err(|error| error.to_string())?;
     Ok(prettyplease::unparse(&file))
@@ -99,7 +99,10 @@ fn hoists_anonymous_aggregates() {
 fn unions_without_borrowed_members_are_their_own_ref() {
     let code = generate("type Small union { u8 | bool | void }").unwrap();
     assert!(code.contains("pub type SmallRef<'a> = Small;"), "{code}");
-    assert!(code.contains("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]"), "{code}");
+    assert!(
+        code.contains("#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -118,7 +121,10 @@ fn rejects_name_collisions() {
     assert!(error.contains("same Rust name foo_bar"), "{error}");
 
     let error = generate("type T struct { toOwned: u8 }").unwrap_err();
-    assert!(error.contains("conflicts with the generated to_owned method"), "{error}");
+    assert!(
+        error.contains("conflicts with the generated to_owned method"),
+        "{error}"
+    );
 
     let error = generate("type E enum { FOO_BAR FooBar }").unwrap_err();
     assert!(error.contains("same Rust variant FooBar"), "{error}");

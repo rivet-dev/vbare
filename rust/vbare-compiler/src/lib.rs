@@ -9,17 +9,10 @@ use std::{
 ///
 /// This allows callers to control how code generation behaves, including
 /// passing through configuration to `vbare_gen`.
+#[derive(Default)]
 pub struct Config {
     /// Configuration forwarded to `vbare_gen` for schema codegen.
     pub vbare: vbare_gen::Config,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            vbare: vbare_gen::Config::default(),
-        }
-    }
 }
 
 /// Process BARE schema files and generate Rust code.

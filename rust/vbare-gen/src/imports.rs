@@ -2,7 +2,7 @@
 
 use crate::{
     parser::{self, AnyType},
-    Config, SchemaGenerator,
+    validate, Config, SchemaGenerator,
 };
 use proc_macro2::TokenStream;
 use quote::quote;
@@ -144,6 +144,8 @@ impl SchemaLoader {
             origins.insert(name.clone(), path.to_owned());
         }
         registry.extend(local.clone());
+        validate::validate(&local, &registry)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
         Ok(Schema {
             local,
             registry,

@@ -123,11 +123,9 @@ fn union_tags_continue_from_explicit_tags() {
 }
 
 #[test]
-fn accepts_zero_lengths_for_the_validator_to_reject() {
-    assert!(matches!(
-        parse_schema("type D data[0]").unwrap()["D"],
-        AnyType::Primitive(PrimitiveType::Data(Some(0)))
-    ));
+fn parses_zero_but_rejects_zero_lengths() {
+    let error = parse_schema("type D data[0]").unwrap_err();
+    assert!(error.contains("at least 1"), "{error}");
 }
 
 #[test]

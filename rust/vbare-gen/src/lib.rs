@@ -106,6 +106,7 @@ mod imports;
 #[allow(clippy::all)]
 #[path = "bare_proc/parser.rs"]
 mod parser;
+mod validate;
 pub use imports::{module_name, SchemaLoader};
 
 /// The parsed schema representation produced by the vendored parser.
@@ -113,10 +114,12 @@ pub mod ast {
     pub use crate::parser::{AnyType, Length, PrimitiveType, StructField};
 }
 
-/// Parses a single schema source without resolving `#import`s. Errors carry the line and column
-/// of the offending token.
+/// Parses and validates a single schema source without resolving `#import`s. Syntax errors carry
+/// the line and column of the offending token.
 pub fn parse_schema(source: &str) -> Result<BTreeMap<String, AnyType>, String> {
-    parser::parse_string(source, &BTreeMap::new())
+    let schema = parser::parse_string(source, &BTreeMap::new())?;
+    validate::validate(&schema, &schema)?;
+    Ok(schema)
 }
 
 /// Configuration for `bare_schema` code generation.

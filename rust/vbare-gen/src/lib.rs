@@ -101,6 +101,10 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 
 mod imports;
+// Vendored upstream code keeps its own formatting and lint profile.
+#[rustfmt::skip]
+#[allow(clippy::all)]
+#[path = "bare_proc/parser.rs"]
 mod parser;
 pub use imports::{module_name, SchemaLoader};
 

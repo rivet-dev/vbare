@@ -8,6 +8,7 @@ description = "Runtime library for VBARE (Versioned Binary Application Record En
 
 [dependencies]
 anyhow.workspace = true
+bytes.workspace = true
 
 [dev-dependencies]
 serde.workspace = true

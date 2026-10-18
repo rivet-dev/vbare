@@ -115,7 +115,7 @@ pub trait Versioned: Sized + 'static {
     /// [`decode`](Versioned::decode) from a slice, under vbare 0.1's name. Copies `payload` once;
     /// callers that hold `Bytes` should call `decode` instead.
     fn deserialize_with_embedded_version(payload: &[u8]) -> anyhow::Result<Self::Latest> {
-        Ok(Self::decode(Bytes::copy_from_slice(payload))?)
+        Self::decode(Bytes::copy_from_slice(payload)).map_err(decode_error)
     }
 
     /// [`seal_to_vec`](Versioned::seal_to_vec) under vbare 0.1's name. Takes the value by
@@ -124,20 +124,36 @@ pub trait Versioned: Sized + 'static {
         value: &Self::Latest,
         version: u16,
     ) -> anyhow::Result<Vec<u8>> {
-        Ok(Self::seal_to_vec(value, version)?)
+        Self::seal_to_vec(value, version).map_err(encode_error)
     }
 
     /// [`decode_body`](Versioned::decode_body) from a slice, under vbare 0.1's name. Copies
     /// `payload` once.
     fn deserialize(payload: &[u8], version: u16) -> anyhow::Result<Self::Latest> {
-        Ok(Self::decode_body(Bytes::copy_from_slice(payload), version)?)
+        Self::decode_body(Bytes::copy_from_slice(payload), version).map_err(decode_error)
     }
 
     /// [`encode_body`](Versioned::encode_body) into a new `Vec`, under vbare 0.1's name.
     fn serialize(value: &Self::Latest, version: u16) -> anyhow::Result<Vec<u8>> {
         let mut out = Vec::with_capacity(value.encoded_len());
-        Self::encode_body(value, version, &mut out)?;
+        Self::encode_body(value, version, &mut out).map_err(encode_error)?;
         Ok(out)
+    }
+}
+
+/// Returns a converter's own error unchanged, as vbare 0.1 did, so callers can still downcast it.
+fn decode_error(error: DecodeError) -> anyhow::Error {
+    match error.into_conversion() {
+        Ok(conversion) => conversion,
+        Err(error) => error.into(),
+    }
+}
+
+/// See [`decode_error`].
+fn encode_error(error: EncodeError) -> anyhow::Error {
+    match error {
+        EncodeError::Conversion(conversion) => conversion,
+        EncodeError::BufferTooSmall { .. } | EncodeError::UnsupportedVersion(_) => error.into(),
     }
 }
 

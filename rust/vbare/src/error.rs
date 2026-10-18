@@ -65,7 +65,8 @@ struct Inner {
     /// Innermost segment first. Built only while an error propagates.
     path: Vec<Segment>,
     detail: Option<Cow<'static, str>>,
-    source: Option<Box<dyn StdError + Send + Sync>>,
+    /// The version converter failure this error wraps, kept as is so callers can downcast it.
+    source: Option<anyhow::Error>,
 }
 
 /// A decode failure with the byte offset and the path to the value that failed, such as
@@ -103,8 +104,17 @@ impl DecodeError {
     #[cold]
     pub fn conversion(source: anyhow::Error) -> Self {
         let mut error = DecodeError::new(DecodeErrorKind::Conversion, 0);
-        error.0.source = Some(source.into());
+        error.0.source = Some(source);
         error
+    }
+
+    /// The version converter failure, for a [`DecodeErrorKind::Conversion`] error.
+    pub fn into_conversion(self) -> Result<anyhow::Error, Self> {
+        let mut inner = self.0;
+        match inner.source.take() {
+            Some(source) => Ok(source),
+            None => Err(DecodeError(inner)),
+        }
     }
 
     pub fn kind(&self) -> DecodeErrorKind {
@@ -186,8 +196,8 @@ impl StdError for DecodeError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         self.0
             .source
-            .as_deref()
-            .map(|source| source as &(dyn StdError + 'static))
+            .as_ref()
+            .map(|source| source.as_ref() as &(dyn StdError + 'static))
     }
 }
 

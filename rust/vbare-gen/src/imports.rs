@@ -128,8 +128,8 @@ impl SchemaLoader {
         }
         let local = parser::parse_string(&source, &registry).map_err(|error| {
             if let Some(origin) = error
-                .strip_prefix("duplicate or shadowed type ")
-                .and_then(|name| origins.get(name))
+                .split_once("duplicate or shadowed type ")
+                .and_then(|(_, name)| origins.get(name))
             {
                 format!(
                     "{}: {error}, imported from {}",

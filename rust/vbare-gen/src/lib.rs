@@ -108,6 +108,17 @@ mod imports;
 mod parser;
 pub use imports::{module_name, SchemaLoader};
 
+/// The parsed schema representation produced by the vendored parser.
+pub mod ast {
+    pub use crate::parser::{AnyType, Length, PrimitiveType, StructField};
+}
+
+/// Parses a single schema source without resolving `#import`s. Errors carry the line and column
+/// of the offending token.
+pub fn parse_schema(source: &str) -> Result<BTreeMap<String, AnyType>, String> {
+    parser::parse_string(source, &BTreeMap::new())
+}
+
 /// Configuration for `bare_schema` code generation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Config {}
@@ -267,7 +278,7 @@ impl SchemaGenerator {
                 .fold(Caps::ALL, Caps::and),
             AnyType::Union(members) => members
                 .iter()
-                .map(|m| self.caps_of(m))
+                .map(|(m, _)| self.caps_of(m))
                 .fold(Caps::ALL, Caps::and),
             AnyType::Enum(_) => Caps::ALL,
             AnyType::TypeReference(name) => match self.user_type_registry.get(name) {
@@ -362,9 +373,9 @@ impl SchemaGenerator {
         })
     }
 
-    fn gen_union(&mut self, name: &String, members: &Vec<AnyType>) -> TokenStream {
+    fn gen_union(&mut self, name: &String, members: &Vec<(AnyType, u64)>) -> TokenStream {
         let mut members_def: Vec<TokenStream> = Vec::with_capacity(members.len());
-        for (i, member) in members.iter().enumerate() {
+        for (i, (member, _)) in members.iter().enumerate() {
             // If this member is a user type alias for void, we'll not generate an inner type later
             let is_void_type = match member {
                 AnyType::TypeReference(i) if self.user_type_registry.get(i).is_some() => {
@@ -413,7 +424,7 @@ impl SchemaGenerator {
         }
         let extra = members
             .iter()
-            .map(|m| self.caps_of(m))
+            .map(|(m, _)| self.caps_of(m))
             .fold(Caps::ALL, Caps::and)
             .derive_tokens();
         self.gen_anonymous(name, |ident| {
@@ -457,17 +468,12 @@ impl SchemaGenerator {
         fields_gen
     }
 
-    fn gen_enum(&mut self, name: &String, members: &Vec<(String, Option<usize>)>) -> TokenStream {
-        let member_defs = members.iter().map(|(name, val)| {
+    /// serde encodes unit variants by index, so explicit values are not reflected here.
+    fn gen_enum(&mut self, name: &String, members: &Vec<(String, u64)>) -> TokenStream {
+        let member_defs = members.iter().map(|(name, _)| {
             let ident = ident_from_string(&name.to_upper_camel_case());
-            if let Some(val) = val {
-                quote! {
-                    #ident = #val
-                }
-            } else {
-                quote! {
-                    #ident
-                }
+            quote! {
+                #ident
             }
         });
         self.gen_anonymous(name, |ident| {

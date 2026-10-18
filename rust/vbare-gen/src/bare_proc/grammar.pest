@@ -21,12 +21,13 @@ list_t            =  { "list" ~ type_t ~ length? }
 type_t            =  _{ "<" ~ any_type ~ ">" }
 struct_t          =  { "struct" ~ "{" ~ struct_field+ ~ "}" }
 map_t             =  { "map" ~ type_t ~ type_t }
-union_t           =  { "union" ~ "{" ~ any_type ~ ("|" ~ any_type)* ~ "}" }
+union_t           =  { "union" ~ "{" ~ "|"? ~ union_member ~ ("|" ~ union_member)* ~ "|"? ~ "}" }
+union_member      =  { any_type ~ ("=" ~ integer)? }
 optional_t        =  { "optional" ~ type_t }
 struct_field      =  { struct_field_name ~ ":" ~ any_type }
 struct_field_name =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
 length            =  _{ "[" ~ integer ~ "]" }
-integer           = !{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+integer           = @{ ASCII_DIGIT+ }
 primative_type      =  _{
     unsigned_t
   | signed_t

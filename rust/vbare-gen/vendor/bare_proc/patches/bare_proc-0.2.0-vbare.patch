@@ -1,6 +1,10 @@
 --- a/src/parser.rs
 +++ b/src/parser.rs
-@@ -4,13 +4,13 @@
+@@ -1,16 +1,16 @@
+ #![allow(dead_code)]
+-use pest::{iterators::Pair, Parser};
++use pest::{error::LineColLocation, iterators::Pair, Parser};
+ use pest_derive::Parser;
  use std::collections::BTreeMap;
  
  #[derive(Parser)]
@@ -16,7 +20,7 @@
      UInt,
      U64,
      U32,
-@@ -31,7 +31,7 @@
+@@ -31,18 +31,20 @@
  
  #[derive(Debug, Clone)]
  pub enum AnyType {
@@ -25,16 +29,54 @@
      List {
          inner: Box<AnyType>,
          length: Option<usize>,
-@@ -53,89 +53,115 @@
+     },
+     Struct(Vec<StructField>),
+-    Enum(Vec<(String, Option<usize>)>),
++    /// Value names with their resolved numeric values.
++    Enum(Vec<(String, u64)>),
+     Map {
+         key: Box<AnyType>,
+         value: Box<AnyType>,
+     },
+-    Union(Vec<AnyType>),
++    /// Member types with their resolved tags.
++    Union(Vec<(AnyType, u64)>),
+     Optional(Box<AnyType>),
+     TypeReference(String),
+ }
+@@ -53,176 +55,266 @@
      pub type_r: AnyType,
  }
  
 -pub fn parse_string(schema: &str) -> BTreeMap<String, AnyType> {
 -    let schema = BARE::parse(Rule::schema, &schema)
 -        .unwrap_or_else(|e| panic!("{}", e))
++/// Formats the start of `pair` as `line:column` for error messages.
++fn location(pair: &Pair<'_, Rule>) -> String {
++    let (line, column) = pair.as_span().start_pos().line_col();
++    format!("{line}:{column}")
++}
++
++fn syntax_error(error: pest::error::Error<Rule>) -> String {
++    let (line, column) = match error.line_col {
++        LineColLocation::Pos(position) | LineColLocation::Span(position, _) => position,
++    };
++    format!("{line}:{column}: {}", error.variant.message())
++}
++
++fn parse_integer<T: std::str::FromStr>(pair: Pair<'_, Rule>) -> Result<T, String> {
++    pair.as_str().parse().map_err(|_| {
++        format!(
++            "{}: integer {} is out of range",
++            location(&pair),
++            pair.as_str()
++        )
++    })
++}
++
 +pub fn imports(schema: &str) -> Result<Vec<String>, String> {
 +    let parsed = BARE::parse(Rule::schema, schema)
-+        .map_err(|error| error.to_string())?
++        .map_err(syntax_error)?
          .next()
 -        .unwrap(); // this can't fail if parsing didn't fail
 -    if schema.as_rule() != Rule::schema {
@@ -49,7 +91,7 @@
 +            .rfind('\n')
 +            .map_or(0, |i| i + 1);
 +        if !schema[line_start..item.as_span().start()].trim().is_empty() {
-+            return Err("#import must be on its own line".into());
++            return Err(format!("{}: #import must be on its own line", location(&item)));
 +        }
 +        imports.push(item.into_inner().next().unwrap().as_str().to_owned());
      }
@@ -71,7 +113,7 @@
 +    imported: &BTreeMap<String, AnyType>,
 +) -> Result<BTreeMap<String, AnyType>, String> {
 +    let schema = BARE::parse(Rule::schema, schema)
-+        .map_err(|error| error.to_string())?
++        .map_err(syntax_error)?
 +        .next()
 +        .unwrap();
 +    let mut registry = imported.clone();
@@ -79,15 +121,19 @@
 +    for item in schema.into_inner() {
 +        if item.as_rule() != Rule::user_type {
 +            continue;
++        }
++        let mut inner = item.into_inner();
++        let name_pair = inner.next().unwrap();
++        let name = name_pair.as_str();
++        let definition = inner.next().unwrap();
++        if registry.contains_key(name) {
++            return Err(format!(
++                "{}: duplicate or shadowed type {name}",
++                location(&name_pair)
++            ));
          }
 -        let t = parse_any_type(&user_type_registry, user_type_type);
 -        user_type_registry.insert(user_type_name.as_str().into(), t);
-+        let mut inner = item.into_inner();
-+        let name = inner.next().unwrap().as_str();
-+        let definition = inner.next().unwrap();
-+        if registry.contains_key(name) {
-+            return Err(format!("duplicate or shadowed type {name}"));
-+        }
 +        let value = parse_any_type(&registry, definition)?;
 +        registry.insert(name.to_owned(), value.clone());
 +        local.insert(name.to_owned(), value);
@@ -115,19 +161,21 @@
          Rule::data_t => {
              let length_t = pair.into_inner().next();
              if let Some(length_t) = length_t {
-                 let length: usize = length_t.as_str().parse().unwrap();
+-                let length: usize = length_t.as_str().parse().unwrap();
 -                AnyType::Primative(PrimativeType::Data(Some(length)))
++                let length: usize = parse_integer(length_t)?;
 +                AnyType::Primitive(PrimitiveType::Data(Some(length)))
              } else {
 -                AnyType::Primative(PrimativeType::Data(None))
 +                AnyType::Primitive(PrimitiveType::Data(None))
              }
          }
-         Rule::enum_t => parse_enum(pair),
+-        Rule::enum_t => parse_enum(pair),
 -        Rule::list_t => parse_list(registry, pair),
 -        Rule::struct_t => parse_struct(registry, pair),
 -        Rule::map_t => parse_map(registry, pair),
 -        Rule::union_t => parse_union(registry, pair),
++        Rule::enum_t => parse_enum(pair)?,
 +        Rule::list_t => parse_list(registry, pair)?,
 +        Rule::struct_t => parse_struct(registry, pair)?,
 +        Rule::map_t => parse_map(registry, pair)?,
@@ -143,11 +191,15 @@
                  AnyType::TypeReference(user_type.into())
              } else {
 -                panic!("User type {user_type} has not been defined yet.");
-+                return Err(format!("user type {user_type} has not been defined yet"));
++                return Err(format!(
++                    "{}: user type {user_type} has not been defined yet",
++                    location(&pair)
++                ));
              }
          }
-         x => panic!("Unreachable: {x:?}"),
+-        x => panic!("Unreachable: {x:?}"),
 -    }
++        x => return Err(format!("{}: unexpected {x:?}", location(&pair))),
 +    })
  }
  
@@ -186,8 +238,34 @@
          _ => unreachable!(),
      })
  }
-@@ -152,77 +178,89 @@
-     AnyType::Enum(members)
+ 
+-fn parse_enum(pair: Pair<'_, Rule>) -> AnyType {
+-    let mut members: Vec<(String, Option<Length>)> = Vec::new();
++/// Resolves enum values per the spec: unassigned values continue from the previous value plus
++/// one, starting at zero.
++fn parse_enum(pair: Pair<'_, Rule>) -> Result<AnyType, String> {
++    let mut members: Vec<(String, u64)> = Vec::new();
++    let mut next = Some(0u64);
+     for enum_value in pair.into_inner() {
+         assert!(enum_value.as_rule() == Rule::enum_value);
+         let mut e = enum_value.into_inner();
+         let enum_value_name = e.next().unwrap();
+-        let value: Option<usize> = e.next().and_then(|e| Some(e.as_str().parse().unwrap()));
++        let value = match e.next() {
++            Some(value) => parse_integer(value)?,
++            None => next.ok_or_else(|| {
++                format!(
++                    "{}: enum value {} is out of range",
++                    location(&enum_value_name),
++                    enum_value_name.as_str()
++                )
++            })?,
++        };
++        next = value.checked_add(1);
+         members.push((enum_value_name.as_str().into(), value));
+     }
+-    AnyType::Enum(members)
++    Ok(AnyType::Enum(members))
  }
  
 -fn parse_list(registry: &BTreeMap<String, AnyType>, pair: Pair<'_, Rule>) -> AnyType {
@@ -198,11 +276,12 @@
      let mut list = pair.into_inner();
      let list_type = list.next().unwrap();
 -    let inner = parse_any_type(registry, list_type);
-+    let inner = parse_any_type(registry, list_type)?;
-     let length: Option<usize> = list
-         .next()
-         .and_then(|e: Pair<'_, Rule>| Some(e.as_str().parse().unwrap()));
+-    let length: Option<usize> = list
+-        .next()
+-        .and_then(|e: Pair<'_, Rule>| Some(e.as_str().parse().unwrap()));
 -    AnyType::List {
++    let inner = parse_any_type(registry, list_type)?;
++    let length: Option<usize> = list.next().map(parse_integer).transpose()?;
 +    Ok(AnyType::List {
          inner: Box::new(inner),
          length,
@@ -256,11 +335,24 @@
 +    pair: Pair<'_, Rule>,
 +) -> Result<AnyType, String> {
      let union_t = pair.into_inner();
-     let mut members: Vec<AnyType> = Vec::new();
+-    let mut members: Vec<AnyType> = Vec::new();
++    let mut members: Vec<(AnyType, u64)> = Vec::new();
++    // Tags follow the same assignment rule as enum values.
++    let mut next = Some(0u64);
      for union_member in union_t {
 -        let t = parse_any_type(registry, union_member);
-+        let t = parse_any_type(registry, union_member)?;
-         members.push(t);
+-        members.push(t);
++        let mut member = union_member.into_inner();
++        let member_type = member.next().unwrap();
++        let member_location = location(&member_type);
++        let t = parse_any_type(registry, member_type)?;
++        let tag = match member.next() {
++            Some(tag) => parse_integer(tag)?,
++            None => next
++                .ok_or_else(|| format!("{member_location}: union tag is out of range"))?,
++        };
++        next = tag.checked_add(1);
++        members.push((t, tag));
      }
 -    AnyType::Union(members)
 +    Ok(AnyType::Union(members))
@@ -321,7 +413,23 @@
  type_l            = _{ "type" }
  user_type         =  { "type" ~ user_type_name ~ any_type }
  user_type_name    = @{ ASCII_ALPHA_UPPER ~ (ASCII_ALPHANUMERIC | "_" | "-")* }
-@@ -42,5 +43,5 @@
+@@ -17,12 +18,13 @@
+ type_t            =  _{ "<" ~ any_type ~ ">" }
+ struct_t          =  { "struct" ~ "{" ~ struct_field+ ~ "}" }
+ map_t             =  { "map" ~ type_t ~ type_t }
+-union_t           =  { "union" ~ "{" ~ any_type ~ ("|" ~ any_type)* ~ "}" }
++union_t           =  { "union" ~ "{" ~ "|"? ~ union_member ~ ("|" ~ union_member)* ~ "|"? ~ "}" }
++union_member      =  { any_type ~ ("=" ~ integer)? }
+ optional_t        =  { "optional" ~ type_t }
+ struct_field      =  { struct_field_name ~ ":" ~ any_type }
+ struct_field_name =  { (ASCII_ALPHANUMERIC | "_" | "-")+ }
+ length            =  _{ "[" ~ integer ~ "]" }
+-integer           = !{ ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
++integer           = @{ ASCII_DIGIT+ }
+ primative_type      =  _{
+     unsigned_t
+   | signed_t
+@@ -42,5 +44,5 @@
    | optional_t
    | primative_type
  }

@@ -16,7 +16,10 @@
 
 pub mod hoist;
 
-use crate::parser::{AnyType, PrimitiveType, StructField};
+use crate::{
+    parser::{AnyType, PrimitiveType, StructField},
+    Config,
+};
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use hoist::Definition;
 use proc_macro2::{Ident, Literal, TokenStream};
@@ -29,6 +32,9 @@ const MAX_INLINE_DATA_LEN: usize = 32;
 /// Suffixes of the items generated for each user type.
 const DERIVED_SUFFIXES: [&str; 3] = ["Ref", "Wire", "View"];
 
+/// The longest fixed-length list serde implements `Serialize` and `Deserialize` for.
+const MAX_SERDE_ARRAY_LEN: usize = 32;
+
 /// Inherent methods on generated `Ref` structs, which field accessors must not shadow.
 const RESERVED_ACCESSORS: [&str; 2] = ["to_owned", "as_bytes"];
 
@@ -37,6 +43,7 @@ const RESERVED_ACCESSORS: [&str; 2] = ["to_owned", "as_bytes"];
 pub fn generate(
     local: &BTreeMap<String, AnyType>,
     registry: &BTreeMap<String, AnyType>,
+    config: Config,
 ) -> Result<TokenStream, String> {
     let mut definitions = Vec::new();
     for (name, definition) in local {
@@ -54,13 +61,79 @@ pub fn generate(
         types.insert(definition.name.clone(), definition.definition.clone());
     }
     check_derived_names(&types)?;
+    if config.serde {
+        for definition in &definitions {
+            check_serde(&definition.name, &definition.definition)?;
+        }
+    }
 
-    let generator = Generator { types: &types };
+    let generator = Generator {
+        types: &types,
+        serde: config.serde,
+    };
     let mut items = Vec::new();
     for definition in &definitions {
         items.push(generator.definition(definition)?);
     }
     Ok(quote! { #(#items)* })
+}
+
+/// Rejects constructs whose serde derives would not write the bytes the codec writes. See
+/// [`Config::serde`]. Hoisted definitions reference their anonymous parts by name, so each part is
+/// checked as its own definition.
+fn check_serde(name: &str, definition: &AnyType) -> Result<(), String> {
+    match definition {
+        AnyType::Primitive(PrimitiveType::UInt | PrimitiveType::Int) => Err(format!(
+            "{name}: uint and int are not supported with serde derives, because serde_bare would \
+             write them as fixed-width integers; use a fixed-width type"
+        )),
+        AnyType::Primitive(_) | AnyType::TypeReference(_) => Ok(()),
+        AnyType::List { inner, length } => {
+            if let Some(length) = length {
+                if *length > MAX_SERDE_ARRAY_LEN {
+                    return Err(format!(
+                        "{name}: fixed-length lists longer than {MAX_SERDE_ARRAY_LEN} are not \
+                         supported with serde derives"
+                    ));
+                }
+            }
+            check_serde(name, inner)
+        }
+        AnyType::Optional(inner) => check_serde(name, inner),
+        AnyType::Map { key, value } => {
+            check_serde(name, key)?;
+            check_serde(name, value)
+        }
+        AnyType::Struct(fields) => {
+            for field in fields {
+                check_serde(&format!("{name}.{}", field.name), &field.type_r)?;
+            }
+            Ok(())
+        }
+        AnyType::Enum(values) => {
+            for (index, (value_name, value)) in values.iter().enumerate() {
+                if *value != index as u64 {
+                    return Err(format!(
+                        "{name}: enum value {value_name} = {value} differs from its index \
+                         {index}, which serde derives would write instead"
+                    ));
+                }
+            }
+            Ok(())
+        }
+        AnyType::Union(members) => {
+            for (index, (member, tag)) in members.iter().enumerate() {
+                if *tag != index as u64 {
+                    return Err(format!(
+                        "{name}: union member {index} has tag {tag}, but serde derives would \
+                         write its index"
+                    ));
+                }
+                check_serde(&format!("{name} member {index}"), member)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Rejects a user type whose name equals another type's generated `Ref`, `Wire` or `View` name.
@@ -129,6 +202,8 @@ fn index_literal(value: usize) -> Literal {
 struct Generator<'a> {
     /// Every type visible to the file, with local anonymous aggregates hoisted.
     types: &'a BTreeMap<String, AnyType>,
+    /// Whether owned types derive serde traits.
+    serde: bool,
 }
 
 /// One union member as generated.
@@ -205,6 +280,15 @@ impl Generator<'_> {
             AnyType::Optional(inner) => self.borrows(inner),
             AnyType::Union(members) => members.iter().any(|(member, _)| self.borrows(member)),
             AnyType::Enum(_) | AnyType::TypeReference(_) => false,
+        }
+    }
+
+    /// The serde derives for owned types, preceded by a comma, if enabled.
+    fn serde_derives(&self) -> TokenStream {
+        if self.serde {
+            quote! { , ::serde::Serialize, ::serde::Deserialize }
+        } else {
+            quote! {}
         }
     }
 
@@ -424,10 +508,11 @@ impl Generator<'_> {
             .first()
             .ok_or_else(|| format!("enum {name} has no values"))?;
         let doc = format!(" BARE enum `{name}`.");
+        let serde_derives = self.serde_derives();
 
         Ok(quote! {
             #[doc = #doc]
-            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash #serde_derives)]
             pub enum #ident {
                 #(#variants),*
             }
@@ -568,6 +653,7 @@ impl Generator<'_> {
             .collect::<Result<_, _>>()?;
         let field_types: Vec<&AnyType> = fields.iter().map(|field| &field.type_r).collect();
         let extra_derives = self.eq_hash_derives(&field_types);
+        let serde_derives = self.serde_derives();
 
         // The struct's borrowed form records where each field after the first starts.
         let last = fields
@@ -632,7 +718,7 @@ impl Generator<'_> {
 
         Ok(quote! {
             #[doc = #doc]
-            #[derive(Clone, Debug, PartialEq #extra_derives)]
+            #[derive(Clone, Debug, PartialEq #extra_derives #serde_derives)]
             pub struct #ident {
                 #(pub #field_idents: #owned,)*
             }
@@ -916,6 +1002,7 @@ impl Generator<'_> {
 
         let member_types: Vec<&AnyType> = members.iter().map(|(member, _)| member).collect();
         let extra_derives = self.eq_hash_derives(&member_types);
+        let serde_derives = self.serde_derives();
         let doc = format!(" BARE union `{name}`.");
         let ref_doc = format!(" Borrowed view of [`{name}`].");
 
@@ -956,7 +1043,7 @@ impl Generator<'_> {
 
         Ok(quote! {
             #[doc = #doc]
-            #[derive(Clone, #copy_derive Debug, PartialEq #extra_derives)]
+            #[derive(Clone, #copy_derive Debug, PartialEq #extra_derives #serde_derives)]
             pub enum #ident {
                 #(#owned_variants),*
             }

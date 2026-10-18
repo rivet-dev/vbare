@@ -62,9 +62,9 @@ impl SchemaLoader {
     }
 
     /// Generate one module. `path` is relative to this loader's schema root.
-    pub fn generate(&mut self, path: &Path, _config: Config) -> Result<TokenStream, Error> {
+    pub fn generate(&mut self, path: &Path, config: Config) -> Result<TokenStream, Error> {
         let schema = self.resolve(path)?;
-        let definitions = codegen::generate(&schema.local, &schema.registry)
+        let definitions = codegen::generate(&schema.local, &schema.registry, config)
             .map_err(|error| format!("{}: {error}", path.display()))?;
         let mut imports = Vec::new();
         for dependency in schema.dependencies {

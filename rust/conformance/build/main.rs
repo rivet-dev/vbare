@@ -140,6 +140,24 @@ fn run() -> Result<(), Error> {
         }
     }
 
+    // Candidate code with serde derives, for `tests/serde.rs`.
+    let serde_root = schemas.join("serde");
+    let mut serde_loader = SchemaLoader::new(&serde_root);
+    let mut serde_cand = String::new();
+    for path in collect_schemas(&serde_root)? {
+        let module = vbare_gen::module_name(&path)?;
+        let tokens = serde_loader.generate(&path, vbare_gen::Config::default().with_serde(true))?;
+        let file: syn::File = syn::parse2(tokens)?;
+        let serde_file = candidate_dir.join(format!("serde_{module}.rs"));
+        fs::write(&serde_file, prettyplease::unparse(&file))?;
+        writeln!(
+            serde_cand,
+            "pub mod {module} {{ include!({:?}); }}",
+            serde_file.display().to_string()
+        )?;
+    }
+    fs::write(out.join("serde.rs"), serde_cand)?;
+
     let generated = format!(
         "pub mod cand {{ {cand} }}\n\
          pub mod desc {{ {desc} }}\n\

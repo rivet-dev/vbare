@@ -41,6 +41,12 @@ mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
+/// Candidate types generated with `vbare_gen::Config::serde` from `schemas/serde`.
+#[allow(clippy::all, dead_code)]
+pub mod serde_cand {
+    include!(concat!(env!("OUT_DIR"), "/serde.rs"));
+}
+
 pub use generated::{cand, cases, ENTRIES};
 
 /// Directory holding the bare-ts schema copies, one subdirectory per set.

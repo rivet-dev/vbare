@@ -11,6 +11,8 @@ mod list;
 mod map;
 mod message;
 mod read;
+#[cfg(feature = "serde")]
+mod serde_impls;
 mod sink;
 mod str;
 pub mod varint;

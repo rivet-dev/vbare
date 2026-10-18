@@ -90,10 +90,29 @@ pub fn parse_schema(source: &str) -> Result<BTreeMap<String, AnyType>, String> {
     Ok(schema)
 }
 
-/// Configuration for code generation. There are no options yet.
+/// Configuration for code generation.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
-pub struct Config {}
+pub struct Config {
+    /// Derive `serde::Serialize` and `serde::Deserialize` on generated owned types.
+    ///
+    /// The crate that includes the generated code must depend on `serde` with the `derive`
+    /// feature and enable the `serde` feature of `vbare`. The derives are shaped so `serde_bare`
+    /// writes exactly the bytes the codec writes. Schemas that `serde_bare` cannot encode that way
+    /// are rejected: `uint` and `int` (a plain `u64` or `i64` would be written as fixed-width
+    /// integers), enum values and union tags that differ from their declaration index (serde
+    /// writes the index), and fixed-length lists longer than 32 elements (serde has no impls for
+    /// them).
+    pub serde: bool,
+}
+
+impl Config {
+    /// Sets [`serde`](Config::serde).
+    pub const fn with_serde(mut self, serde: bool) -> Self {
+        self.serde = serde;
+        self
+    }
+}
 
 /// Generates Rust code for the schema at `schema_path`. Imports resolve relative to the schema's
 /// directory.

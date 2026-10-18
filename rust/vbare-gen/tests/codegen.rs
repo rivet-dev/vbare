@@ -2,13 +2,17 @@
 //! and `rust/conformance`.
 
 use std::{fs, path::Path};
-use vbare_gen::SchemaLoader;
+use vbare_gen::{Config, SchemaLoader};
 
 fn generate(schema: &str) -> Result<String, String> {
+    generate_with(schema, Config::default())
+}
+
+fn generate_with(schema: &str, config: Config) -> Result<String, String> {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("schema.v1.bare"), schema).unwrap();
     let tokens = SchemaLoader::new(dir.path())
-        .generate(Path::new("schema.v1.bare"), Default::default())
+        .generate(Path::new("schema.v1.bare"), config)
         .map_err(|error| error.to_string())?;
     let file: syn::File = syn::parse2(tokens).map_err(|error| error.to_string())?;
     Ok(prettyplease::unparse(&file))
@@ -131,4 +135,53 @@ fn rejects_name_collisions() {
 
     let error = generate("type T struct { a: struct { b: u8 } }\ntype TA u8").unwrap_err();
     assert!(error.contains("TA"), "{error}");
+}
+
+#[test]
+fn serde_derives_are_opt_in() {
+    let schema = "type P struct { x: i32 name: str }\n\
+                  type U union { P | str }\n\
+                  type K enum { A B }";
+
+    let code = generate(schema).unwrap();
+    assert!(!code.contains("serde"), "{code}");
+
+    // One derive each on the struct, the union and the enum, and none on the borrowed forms.
+    let code = generate_with(schema, Config::default().with_serde(true)).unwrap();
+    assert_eq!(code.matches("::serde::Serialize").count(), 3, "{code}");
+    assert_eq!(code.matches("::serde::Deserialize").count(), 3, "{code}");
+    assert!(
+        code.contains(
+            "#[derive(Clone, Debug, PartialEq, Eq, Hash, ::serde::Serialize, ::serde::Deserialize)]\npub struct P {"
+        ),
+        "{code}"
+    );
+}
+
+#[test]
+fn serde_rejects_constructs_serde_bare_writes_differently() {
+    let serde = Config::default().with_serde(true);
+    for (schema, expected) in [
+        ("type T struct { a: uint }", "T.a: uint and int"),
+        ("type T struct { a: optional<list<int>> }", "T.a: uint and int"),
+        ("type T union { u8 | uint }", "T member 1: uint and int"),
+        ("type T map<str><uint>", "T: uint and int"),
+        ("type T struct { a: struct { b: int } }", "TA.b: uint and int"),
+        ("type E enum { A B = 5 }", "enum value B = 5 differs from its index 1"),
+        ("type U union { u8 | str = 3 }", "union member 1 has tag 3"),
+        ("type T list<u8>[33]", "fixed-length lists longer than 32"),
+    ] {
+        let error = generate_with(schema, serde).unwrap_err();
+        assert!(error.contains(expected), "{schema}: {error}");
+        generate(schema).unwrap();
+    }
+
+    // Explicit values equal to the index, fixed lists up to 32 and long fixed data are accepted.
+    generate_with(
+        "type E enum { A = 0 B = 1 C }\n\
+         type U union { u8 = 0 | str }\n\
+         type T struct { a: list<u8>[32] b: data[64] }",
+        serde,
+    )
+    .unwrap();
 }

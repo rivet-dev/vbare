@@ -154,3 +154,17 @@ impl<W: Wire> Encode for View<W> {
         out.put_data(&self.bytes);
     }
 }
+
+/// A `void` type used as a whole message, such as an empty response, encodes to no bytes. This
+/// lets a versioned envelope carry it as its latest value.
+impl Encode for () {
+    fn encoded_len(&self) -> usize {
+        0
+    }
+
+    fn encode<S: Sink>(&self, _out: &mut S) {}
+}
+
+impl Message for () {
+    type Wire = crate::wire::Void;
+}

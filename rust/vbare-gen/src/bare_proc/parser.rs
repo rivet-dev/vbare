@@ -304,20 +304,3 @@ fn parse_float(pair: Pair<'_, Rule>) -> AnyType {
         _ => unreachable!(),
     })
 }
-
-// #[cfg(test)]
-// mod test {
-// 	use std::fs::read_to_string;
-//
-// 	use super::*;
-//
-// 	#[test]
-// 	fn basic() {
-// 		let file = read_to_string("./src/example.bare").unwrap();
-// 		let user_type_registry: BTreeMap<String, AnyType> = parse_string(&file);
-//
-// 		for (key, value) in user_type_registry.iter() {
-// 			println!("{} = {:?}", key, value);
-// 		}
-// 	}
-// }

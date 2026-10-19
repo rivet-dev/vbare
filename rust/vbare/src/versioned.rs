@@ -5,7 +5,10 @@ use crate::{
     message::{Encode, Message, View},
     sink::Sink,
 };
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+
+/// The length of the little-endian `u16` version header.
+const HEADER_LEN: usize = 2;
 
 /// A converter between adjacent versions of a versioned enum.
 pub type Converter<T> = fn(T) -> anyhow::Result<T>;
@@ -105,11 +108,52 @@ pub trait Versioned: Sized + 'static {
         converted.encode_version(version, out)
     }
 
+    /// The exact number of bytes [`seal`](Versioned::seal) writes for `value` at the latest
+    /// version: the header plus the body. An older version converts the value first, so its length
+    /// is only known once it is encoded.
+    fn sealed_len(value: &Self::Latest) -> usize {
+        HEADER_LEN + value.encoded_len()
+    }
+
     /// [`seal`](Versioned::seal) into a new `Vec`.
     fn seal_to_vec(value: &Self::Latest, version: u16) -> Result<Vec<u8>, EncodeError> {
-        let mut out = Vec::with_capacity(2 + value.encoded_len());
+        let mut out = Vec::with_capacity(Self::sealed_len(value));
         Self::seal(value, version, &mut out)?;
         Ok(out)
+    }
+
+    /// [`seal`](Versioned::seal) into a new `Bytes`, allocated once at the exact length for the
+    /// latest version.
+    fn seal_to_bytes(value: &Self::Latest, version: u16) -> Result<Bytes, EncodeError> {
+        let mut out = BytesMut::with_capacity(Self::sealed_len(value));
+        Self::seal(value, version, &mut out)?;
+        Ok(out.freeze())
+    }
+
+    /// Seals `value` at `version` into the front of `out` and returns the number of bytes
+    /// written. Fails with [`EncodeError::BufferTooSmall`] instead of panicking when `out` is too
+    /// short, and then writes nothing.
+    ///
+    /// At the latest version the header and body go straight into `out` after one length check.
+    /// An older version is converted and encoded into a temporary buffer first, because its
+    /// length is not known before encoding, so only legacy writes pay for a copy.
+    fn seal_to_slice(
+        value: &Self::Latest,
+        version: u16,
+        out: &mut [u8],
+    ) -> Result<usize, EncodeError> {
+        if version != Self::LATEST {
+            let sealed = Self::seal_to_vec(value, version)?;
+            check_capacity(sealed.len(), out.len())?;
+            out[..sealed.len()].copy_from_slice(&sealed);
+            return Ok(sealed.len());
+        }
+
+        let needed = Self::sealed_len(value);
+        check_capacity(needed, out.len())?;
+        let mut cursor = &mut out[..needed];
+        Self::seal(value, version, &mut cursor)?;
+        Ok(needed)
     }
 
     /// [`decode`](Versioned::decode) from a slice, under vbare 0.1's name. Copies `payload` once;
@@ -157,15 +201,22 @@ fn encode_error(error: EncodeError) -> anyhow::Error {
     }
 }
 
+fn check_capacity(needed: usize, available: usize) -> Result<(), EncodeError> {
+    if needed > available {
+        return Err(EncodeError::BufferTooSmall { needed, available });
+    }
+    Ok(())
+}
+
 fn split_header(mut bytes: Bytes) -> Result<(u16, Bytes), DecodeError> {
-    if bytes.len() < 2 {
+    if bytes.len() < HEADER_LEN {
         return Err(DecodeError::with_detail(
             DecodeErrorKind::Truncated,
             bytes.len(),
             "missing version header",
         ));
     }
-    let body = bytes.split_off(2);
+    let body = bytes.split_off(HEADER_LEN);
     let version = u16::from_le_bytes([bytes[0], bytes[1]]);
     Ok((version, body))
 }

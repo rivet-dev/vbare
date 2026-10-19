@@ -383,3 +383,57 @@ fn slice_helpers_match_the_bytes_api() {
         Some(EncodeError::UnsupportedVersion(0))
     ));
 }
+
+#[test]
+fn seals_into_caller_buffers_at_every_version() {
+    let value = latest();
+    assert_eq!(
+        TestData::sealed_len(&value),
+        TestData::seal_to_vec(&value, 3).unwrap().len()
+    );
+
+    for version in 1..=3u16 {
+        let expected = TestData::seal_to_vec(&value, version).unwrap();
+
+        let bytes = TestData::seal_to_bytes(&value, version).unwrap();
+        assert_eq!(bytes, expected);
+
+        // The message lands at the front of a larger buffer and the rest is untouched.
+        let mut out = [0xaa; 64];
+        let written = TestData::seal_to_slice(&value, version, &mut out).unwrap();
+        assert_eq!(&out[..written], &expected[..]);
+        assert!(out[written..].iter().all(|byte| *byte == 0xaa));
+
+        // An exact fit works; one byte less fails without writing.
+        let mut exact = vec![0; expected.len()];
+        assert_eq!(
+            TestData::seal_to_slice(&value, version, &mut exact).unwrap(),
+            expected.len()
+        );
+        assert_eq!(exact, expected);
+        let mut short = vec![0; expected.len() - 1];
+        assert!(matches!(
+            TestData::seal_to_slice(&value, version, &mut short),
+            Err(EncodeError::BufferTooSmall { needed, available })
+                if needed == expected.len() && available == expected.len() - 1
+        ));
+        assert!(short.iter().all(|byte| *byte == 0));
+    }
+}
+
+#[test]
+fn seals_behind_existing_bytes_in_one_buffer() {
+    // A caller framing the message behind its own prefix seals straight into its buffer, so the
+    // body is never encoded into a buffer of its own and copied.
+    let value = latest();
+    let mut frame = vbare::BytesMut::with_capacity(4 + TestData::sealed_len(&value));
+    frame.extend_from_slice(
+        &u32::try_from(TestData::sealed_len(&value))
+            .unwrap()
+            .to_be_bytes(),
+    );
+    let capacity = frame.capacity();
+    TestData::seal(&value, 3, &mut frame).unwrap();
+    assert_eq!(frame.capacity(), capacity);
+    assert_eq!(&frame[4..], &TestData::seal_to_vec(&value, 3).unwrap()[..]);
+}

@@ -114,6 +114,12 @@ or their `*_body` variants when the version is negotiated separately:
 // Embed the version in the payload header.
 let bytes = MyTypeVersioned::seal_to_vec(&latest, 1)?;
 
+// Or write the header and body straight into a buffer you own, such as a frame that already
+// holds a length prefix. `sealed_len` is the exact length at the latest version.
+frame.reserve(MyTypeVersioned::sealed_len(&latest));
+MyTypeVersioned::seal(&latest, 2, &mut frame)?;
+let written = MyTypeVersioned::seal_to_slice(&latest, 2, &mut fixed_buffer)?;
+
 // Decode any supported version into the latest type.
 let latest = MyTypeVersioned::decode(Bytes::from(bytes))?;
 

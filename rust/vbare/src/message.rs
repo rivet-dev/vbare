@@ -99,6 +99,20 @@ pub fn decode<W: Wire>(bytes: &Bytes) -> Result<W::Owned, DecodeError> {
     Ok(value)
 }
 
+/// Runs a hand-written reader over `bytes` and checks that it consumed them exactly.
+///
+/// This is how a hand-written [`Body`](crate::Body) decodes a value field by field: `read` calls
+/// [`Wire::verify_owned`] for each field's marker in order, as generated code does.
+pub fn decode_with<T>(
+    bytes: &Bytes,
+    read: impl FnOnce(&mut Verifier<'_>) -> Result<T, DecodeError>,
+) -> Result<T, DecodeError> {
+    let mut verifier = Verifier::new(bytes)?;
+    let value = read(&mut verifier)?;
+    verifier.finish()?;
+    Ok(value)
+}
+
 /// A verified message that owns its buffer. Accessing fields reads them in place.
 ///
 /// `View` is `Send + Sync + 'static` and cheap to clone, so it can be stored or shared across

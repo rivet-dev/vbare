@@ -1,6 +1,7 @@
 //! Versioned framing: a 2-byte little-endian version header followed by the message body.
 
 use crate::{
+    body::Body,
     error::{DecodeError, DecodeErrorKind, EncodeError},
     message::{Encode, Message, View},
     sink::Sink,
@@ -22,8 +23,12 @@ pub type Converter<T> = fn(T) -> anyhow::Result<T>;
 ///
 /// The header is the version as a little-endian `u16`, byte-identical to vbare 0.1's
 /// `serialize_with_embedded_version`.
+///
+/// The latest value is usually a generated message. It can be any [`Body`], such as a domain type
+/// stored as a generated message or an `Option<i64>`; only [`open`](Versioned::open) and
+/// [`open_body`](Versioned::open_body), which return a view, need a message.
 pub trait Versioned: Sized + 'static {
-    type Latest: Message + Clone;
+    type Latest: Body;
 
     /// The newest version, which [`Latest`](Versioned::Latest) encodes.
     const LATEST: u16;
@@ -47,7 +52,7 @@ pub trait Versioned: Sized + 'static {
     /// Decodes a body without a header, written at `version`.
     fn decode_body(body: Bytes, version: u16) -> Result<Self::Latest, DecodeError> {
         if version == Self::LATEST {
-            return Self::Latest::decode(body);
+            return Self::Latest::from_body(body);
         }
         check_decode_version::<Self>(version)?;
         let mut value = Self::decode_version(version, body)?;
@@ -63,7 +68,10 @@ pub trait Versioned: Sized + 'static {
     fn open_body(
         body: Bytes,
         version: u16,
-    ) -> Result<View<<Self::Latest as Message>::Wire>, DecodeError> {
+    ) -> Result<View<<Self::Latest as Message>::Wire>, DecodeError>
+    where
+        Self::Latest: Message,
+    {
         if version == Self::LATEST {
             return Self::Latest::view(body);
         }
@@ -78,7 +86,7 @@ pub trait Versioned: Sized + 'static {
         out: &mut S,
     ) -> Result<(), EncodeError> {
         if version == Self::LATEST {
-            value.encode(out);
+            value.put_body(out);
             return Ok(());
         }
         downgrade::<Self>(value, version)?.encode_version(version, out)
@@ -91,7 +99,10 @@ pub trait Versioned: Sized + 'static {
     }
 
     /// Views a payload with a version header. A latest-version payload is viewed without copying.
-    fn open(bytes: Bytes) -> Result<View<<Self::Latest as Message>::Wire>, DecodeError> {
+    fn open(bytes: Bytes) -> Result<View<<Self::Latest as Message>::Wire>, DecodeError>
+    where
+        Self::Latest: Message,
+    {
         let (version, body) = split_header(bytes)?;
         Self::open_body(body, version)
     }
@@ -100,7 +111,7 @@ pub trait Versioned: Sized + 'static {
     fn seal<S: Sink>(value: &Self::Latest, version: u16, out: &mut S) -> Result<(), EncodeError> {
         if version == Self::LATEST {
             out.put_u16_le(version);
-            value.encode(out);
+            value.put_body(out);
             return Ok(());
         }
         let converted = downgrade::<Self>(value, version)?;
@@ -112,7 +123,7 @@ pub trait Versioned: Sized + 'static {
     /// version: the header plus the body. An older version converts the value first, so its length
     /// is only known once it is encoded.
     fn sealed_len(value: &Self::Latest) -> usize {
-        HEADER_LEN + value.encoded_len()
+        HEADER_LEN + value.body_len()
     }
 
     /// [`seal`](Versioned::seal) into a new `Vec`.
@@ -179,7 +190,7 @@ pub trait Versioned: Sized + 'static {
 
     /// [`encode_body`](Versioned::encode_body) into a new `Vec`, under vbare 0.1's name.
     fn serialize(value: &Self::Latest, version: u16) -> anyhow::Result<Vec<u8>> {
-        let mut out = Vec::with_capacity(value.encoded_len());
+        let mut out = Vec::with_capacity(value.body_len());
         Self::encode_body(value, version, &mut out).map_err(encode_error)?;
         Ok(out)
     }

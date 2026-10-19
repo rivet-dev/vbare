@@ -5,6 +5,7 @@
 //! ([`Message::decode`]) share `str` and `data` bytes with the input instead of copying them.
 //! Encoding ([`Encode`]) writes once into a [`Sink`] with an exact precomputed length.
 
+mod body;
 mod error;
 mod fixed;
 mod list;
@@ -19,12 +20,13 @@ pub mod varint;
 mod versioned;
 pub mod wire;
 
+pub use body::Body;
 pub use bytes::{self, Bytes, BytesMut};
 pub use error::{DecodeError, DecodeErrorKind, EncodeError};
 pub use fixed::FixedBytes;
 pub use list::{ListIter, ListRef};
 pub use map::{MapIter, MapRef};
-pub use message::{decode, verify, Encode, Message, View};
+pub use message::{decode, decode_with, verify, Encode, Message, View};
 pub use read::{Reader, Verifier};
 pub use sink::Sink;
 pub use str::Str;

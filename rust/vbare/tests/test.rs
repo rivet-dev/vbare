@@ -3,8 +3,8 @@
 use anyhow::{bail, Result};
 use vbare::{
     wire::{self, Wire},
-    Bytes, DecodeError, DecodeErrorKind, Encode, EncodeError, Message, Reader, Sink, Str, Verifier,
-    Versioned,
+    Body, Bytes, DecodeError, DecodeErrorKind, Encode, EncodeError, Message, Reader, Sink, Str,
+    Verifier, Versioned,
 };
 
 /// Defines a struct with a hand-written `Wire` implementation, as generated code would.
@@ -478,4 +478,256 @@ fn detached_values_stop_sharing_the_source_buffer() {
     let fixed_detached = fixed.detach();
     assert_eq!(fixed_detached, fixed);
     assert!(!shares(&source, fixed_detached.as_bytes()));
+}
+
+/// A domain type stored on the wire as `TestDataV1`, with a `String` name the schema type does
+/// not use.
+#[derive(Clone, Debug, PartialEq)]
+struct Account {
+    id: u32,
+    name: String,
+}
+
+impl Account {
+    fn to_wire(&self) -> TestDataV1 {
+        TestDataV1 {
+            id: self.id,
+            name: self.name.clone().into(),
+        }
+    }
+}
+
+impl Body for Account {
+    fn body_len(&self) -> usize {
+        self.to_wire().encoded_len()
+    }
+
+    fn put_body<S: Sink>(&self, out: &mut S) {
+        self.to_wire().encode(out);
+    }
+
+    fn from_body(bytes: Bytes) -> Result<Self, DecodeError> {
+        let wire = TestDataV1::decode(bytes)?;
+        Ok(Account {
+            id: wire.id,
+            name: wire.name.to_string(),
+        })
+    }
+}
+
+/// Version 1 stored only an id; version 2 is the domain type.
+#[derive(Clone)]
+enum AccountVersioned {
+    V1(u32),
+    V2(Account),
+}
+
+impl Versioned for AccountVersioned {
+    type Latest = Account;
+
+    const LATEST: u16 = 2;
+    const UPGRADES: &'static [vbare::Converter<Self>] = &[Self::v1_to_v2];
+    const DOWNGRADES: &'static [vbare::Converter<Self>] = &[Self::v2_to_v1];
+
+    fn wrap_latest(latest: Account) -> Self {
+        AccountVersioned::V2(latest)
+    }
+
+    fn unwrap_latest(self) -> Result<Account> {
+        match self {
+            AccountVersioned::V2(account) => Ok(account),
+            AccountVersioned::V1(_) => bail!("version not latest"),
+        }
+    }
+
+    fn decode_version(version: u16, body: Bytes) -> Result<Self, DecodeError> {
+        match version {
+            1 => Ok(AccountVersioned::V1(u32::from_body(body)?)),
+            _ => Err(DecodeError::new(DecodeErrorKind::UnsupportedVersion, 0)),
+        }
+    }
+
+    fn encode_version<S: Sink>(&self, version: u16, out: &mut S) -> Result<(), EncodeError> {
+        match (self, version) {
+            (AccountVersioned::V1(id), 1) => id.put_body(out),
+            (AccountVersioned::V2(account), 2) => account.put_body(out),
+            (_, version) => return Err(EncodeError::UnsupportedVersion(version)),
+        }
+        Ok(())
+    }
+}
+
+impl AccountVersioned {
+    fn v1_to_v2(self) -> Result<Self> {
+        match self {
+            AccountVersioned::V1(id) => Ok(AccountVersioned::V2(Account {
+                id,
+                name: format!("account-{id}"),
+            })),
+            other => Ok(other),
+        }
+    }
+
+    fn v2_to_v1(self) -> Result<Self> {
+        match self {
+            AccountVersioned::V2(account) => Ok(AccountVersioned::V1(account.id)),
+            other => Ok(other),
+        }
+    }
+}
+
+/// An optional timestamp stored directly as BARE `optional<i64>`.
+#[derive(Clone)]
+enum Deadline {
+    V1(Option<i64>),
+}
+
+impl Versioned for Deadline {
+    type Latest = Option<i64>;
+
+    const LATEST: u16 = 1;
+
+    fn wrap_latest(latest: Option<i64>) -> Self {
+        Deadline::V1(latest)
+    }
+
+    fn unwrap_latest(self) -> Result<Option<i64>> {
+        let Deadline::V1(latest) = self;
+        Ok(latest)
+    }
+
+    fn decode_version(_version: u16, _body: Bytes) -> Result<Self, DecodeError> {
+        Err(DecodeError::new(DecodeErrorKind::UnsupportedVersion, 0))
+    }
+
+    fn encode_version<S: Sink>(&self, _version: u16, out: &mut S) -> Result<(), EncodeError> {
+        let Deadline::V1(latest) = self;
+        latest.put_body(out);
+        Ok(())
+    }
+}
+
+#[test]
+fn domain_latest_values_convert_between_versions() {
+    let account = Account {
+        id: 7,
+        name: "seven".into(),
+    };
+
+    // The latest version is the schema type's bytes behind the header.
+    let sealed = AccountVersioned::seal_to_vec(&account, 2).unwrap();
+    assert_eq!(&sealed[..2], &[2, 0]);
+    assert_eq!(&sealed[2..], &account.to_wire().encode_to_vec()[..]);
+    assert_eq!(AccountVersioned::sealed_len(&account), sealed.len());
+    assert_eq!(
+        AccountVersioned::decode(Bytes::from(sealed)).unwrap(),
+        account
+    );
+
+    // Older versions downgrade and upgrade through the converters.
+    let v1 = AccountVersioned::seal_to_vec(&account, 1).unwrap();
+    assert_eq!(v1, [1, 0, 7, 0, 0, 0]);
+    assert_eq!(
+        AccountVersioned::decode(Bytes::from(v1)).unwrap(),
+        Account {
+            id: 7,
+            name: "account-7".into(),
+        }
+    );
+    assert_eq!(
+        AccountVersioned::deserialize_with_embedded_version(
+            &AccountVersioned::serialize_with_embedded_version(&account, 2).unwrap()
+        )
+        .unwrap(),
+        account
+    );
+}
+
+#[test]
+fn primitive_latest_values_encode_as_bare() {
+    // BARE `optional<i64>`: a tag byte, then eight little-endian bytes. serde_bare writes
+    // `Option<i64>` the same way.
+    let at = Some(1_725_000_000_123i64);
+    let sealed = Deadline::seal_to_vec(&at, 1).unwrap();
+    let mut expected = vec![1, 0, 1];
+    expected.extend_from_slice(&1_725_000_000_123i64.to_le_bytes());
+    assert_eq!(sealed, expected);
+    assert_eq!(Deadline::decode(Bytes::from(sealed)).unwrap(), at);
+
+    assert_eq!(Deadline::seal_to_vec(&None, 1).unwrap(), [1, 0, 0]);
+    assert_eq!(
+        Deadline::decode(Bytes::from_static(&[1, 0, 0])).unwrap(),
+        None
+    );
+
+    for (input, kind) in [
+        (&[1u8, 0][..], DecodeErrorKind::Truncated),
+        (&[1, 0, 2][..], DecodeErrorKind::InvalidTag),
+        (&[1, 0, 0, 0][..], DecodeErrorKind::TrailingBytes),
+        (&[1, 0, 1, 0][..], DecodeErrorKind::Truncated),
+        (
+            &[1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0][..],
+            DecodeErrorKind::TrailingBytes,
+        ),
+    ] {
+        let error = Deadline::decode(Bytes::copy_from_slice(input)).unwrap_err();
+        assert_eq!(error.kind(), kind, "{input:?}");
+    }
+}
+
+/// A hand-written body of three BARE `optional<str>` fields, decoded field by field.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct TraceContext {
+    ray_id: Option<Str>,
+    traceparent: Option<Str>,
+    tracestate: Option<Str>,
+}
+
+type OptionalStr = wire::Optional<wire::Str>;
+
+impl Body for TraceContext {
+    fn body_len(&self) -> usize {
+        OptionalStr::encoded_len(&self.ray_id)
+            + OptionalStr::encoded_len(&self.traceparent)
+            + OptionalStr::encoded_len(&self.tracestate)
+    }
+
+    fn put_body<S: Sink>(&self, out: &mut S) {
+        OptionalStr::encode(&self.ray_id, out);
+        OptionalStr::encode(&self.traceparent, out);
+        OptionalStr::encode(&self.tracestate, out);
+    }
+
+    fn from_body(bytes: Bytes) -> Result<Self, DecodeError> {
+        vbare::decode_with(&bytes, |v| {
+            Ok(TraceContext {
+                ray_id: OptionalStr::verify_owned(v)?,
+                traceparent: OptionalStr::verify_owned(v)?,
+                tracestate: OptionalStr::verify_owned(v)?,
+            })
+        })
+    }
+}
+
+#[test]
+fn hand_written_bodies_decode_field_by_field() {
+    let value = TraceContext {
+        ray_id: Some("ray".into()),
+        traceparent: None,
+        tracestate: Some("".into()),
+    };
+    let mut body = Vec::new();
+    value.put_body(&mut body);
+    assert_eq!(body, [1, 3, b'r', b'a', b'y', 0, 1, 0]);
+    assert_eq!(body.len(), value.body_len());
+    assert_eq!(
+        TraceContext::from_body(Bytes::from(body.clone())).unwrap(),
+        value
+    );
+
+    body.push(0);
+    let error = TraceContext::from_body(Bytes::from(body)).unwrap_err();
+    assert_eq!(error.kind(), DecodeErrorKind::TrailingBytes);
+    let error = TraceContext::from_body(Bytes::from_static(&[1, 9, b'x'])).unwrap_err();
+    assert_eq!(error.kind(), DecodeErrorKind::LengthExceedsInput);
 }

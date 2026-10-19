@@ -107,6 +107,11 @@ impl Versioned for MyTypeVersioned {
 }
 ```
 
+The latest value does not have to be a generated type. Any `vbare::Body` works: implement it for a
+domain type that is stored as a generated message, or use `Option<T>`, `bool` or a fixed-width
+number directly (encoded as BARE `optional<T>`, `bool` and `u8` to `f64`). Only `open` and
+`open_body`, which return a view, need the latest value to be a generated message.
+
 Then use `decode`/`open`/`seal`, which read and write the 2-byte little-endian version header,
 or their `*_body` variants when the version is negotiated separately:
 

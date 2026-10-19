@@ -437,3 +437,45 @@ fn seals_behind_existing_bytes_in_one_buffer() {
     assert_eq!(frame.capacity(), capacity);
     assert_eq!(&frame[4..], &TestData::seal_to_vec(&value, 3).unwrap()[..]);
 }
+
+/// Whether `inner` points into `outer`'s memory.
+fn shares(outer: &[u8], inner: &[u8]) -> bool {
+    let range = outer.as_ptr_range();
+    range.contains(&inner.as_ptr())
+}
+
+#[test]
+fn detached_values_stop_sharing_the_source_buffer() {
+    // A small record at the front of a 1 MiB buffer, as a record decoded from a large frame or a
+    // cached block would be.
+    let record = TestDataV2 {
+        id: 5,
+        name: "short-name".into(),
+        description: "short-description".into(),
+    };
+    let mut buffer = record.encode_to_vec();
+    let len = buffer.len();
+    buffer.resize(1 << 20, 0);
+    let source = Bytes::from(buffer);
+
+    let decoded = TestDataV2::decode(source.slice(..len)).unwrap();
+    assert!(shares(&source, decoded.name.as_bytes()));
+
+    let name = decoded.name.detach();
+    assert_eq!(name, decoded.name);
+    assert!(!shares(&source, name.as_bytes()));
+
+    let detached = decoded.detach();
+    assert_eq!(detached, decoded);
+    assert!(!shares(&source, detached.name.as_bytes()));
+    assert!(!shares(&source, detached.description.as_bytes()));
+    // Both fields share one new buffer the size of the record.
+    let gap = detached.description.as_ptr() as usize - detached.name.as_ptr() as usize;
+    assert!(gap < len);
+
+    let source = Bytes::from(vec![7u8; 4096]);
+    let fixed = vbare::FixedBytes::<40>::new(source.slice(..40)).unwrap();
+    let fixed_detached = fixed.detach();
+    assert_eq!(fixed_detached, fixed);
+    assert!(!shares(&source, fixed_detached.as_bytes()));
+}

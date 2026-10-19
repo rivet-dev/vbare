@@ -59,6 +59,17 @@ impl Str {
     pub fn into_bytes(self) -> Bytes {
         self.0
     }
+
+    /// Copies the string into an allocation of its own, so it no longer keeps the buffer it was
+    /// decoded from alive.
+    ///
+    /// A decoded `Str` shares its source buffer, so storing a short name taken from a 1 MiB
+    /// message keeps all 1 MiB in memory. Call this before storing a small field past the life
+    /// of a large input. `Bytes` fields detach with [`Bytes::copy_from_slice`].
+    #[inline]
+    pub fn detach(&self) -> Str {
+        Str(Bytes::copy_from_slice(&self.0))
+    }
 }
 
 impl Deref for Str {

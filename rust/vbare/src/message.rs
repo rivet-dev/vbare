@@ -60,6 +60,24 @@ pub trait Message: Encode + Sized {
     fn decode(bytes: Bytes) -> Result<Self, DecodeError> {
         decode::<Self::Wire>(&bytes)
     }
+
+    /// Returns a copy whose `str` and `data` fields share one new buffer of exactly the encoded
+    /// size, instead of the buffer this value was decoded from.
+    ///
+    /// A decoded value keeps its whole input alive, so a small record taken from a large frame
+    /// or cached block pins all of it. Detaching costs one encode, one allocation of the encoded
+    /// size and one decode; use it before storing a small value past the life of a large input.
+    /// To keep only a few fields of a large value, detach those fields with
+    /// [`Str::detach`](crate::Str::detach) or `Bytes::copy_from_slice` instead.
+    ///
+    /// A value whose encoding exceeds 4 GiB cannot be verified, so it is returned as a plain
+    /// clone that still shares its buffers. That size is never a small value.
+    fn detach(&self) -> Self
+    where
+        Self: Clone,
+    {
+        Self::decode(self.encode_to_bytes()).unwrap_or_else(|_| self.clone())
+    }
 }
 
 /// Checks that `bytes` hold exactly one valid `W` and returns its borrowed form.

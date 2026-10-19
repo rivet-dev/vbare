@@ -42,6 +42,13 @@ impl<const N: usize> FixedBytes<N> {
     pub fn into_bytes(self) -> Bytes {
         self.0
     }
+
+    /// Copies the bytes into an allocation of their own, so they no longer keep the buffer they
+    /// were decoded from alive. See [`Str::detach`](crate::Str::detach).
+    #[inline]
+    pub fn detach(&self) -> FixedBytes<N> {
+        FixedBytes(Bytes::copy_from_slice(&self.0))
+    }
 }
 
 impl<const N: usize> Default for FixedBytes<N> {

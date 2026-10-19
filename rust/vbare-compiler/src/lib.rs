@@ -1,4 +1,3 @@
-use indoc::formatdoc;
 use std::{
     collections::BTreeMap,
     fs,
@@ -74,12 +73,8 @@ pub fn process_schemas_to_dir(
             out_path.join(format!("{output_name}_generated.rs")),
             content,
         )?;
-        mod_content.push_str(&formatdoc!(
-            r#"
-            pub mod {module_name} {{
-                include!(concat!(env!("OUT_DIR"), "/{output_name}_generated.rs"));
-            }}
-            "#,
+        mod_content.push_str(&format!(
+            "pub mod {module_name} {{\n    include!(concat!(env!(\"OUT_DIR\"), \"/{output_name}_generated.rs\"));\n}}\n"
         ));
     }
     fs::write(out_path.join("combined_imports.rs"), mod_content)?;

@@ -8,7 +8,6 @@ description = "Compile-time code generation for VBARE (Versioned Binary Applicat
 
 [dependencies]
 vbare-gen = { path = "../vbare-gen", version = "0.2.0" }
-indoc.workspace = true
 prettyplease.workspace = true
 syn.workspace = true
 

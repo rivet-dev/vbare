@@ -1,26 +1,23 @@
 [workspace]
-members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic"]
+members = ["vbare-gen", "vbare-compiler", "vbare", "examples/basic", "conformance"]
+exclude = ["conformance/fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Rivet Gaming, Inc. <developer@rivet.dev>"]
 license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1.0"
+bytes = "1"
 heck = "0.5"
-indoc = "2.0"
 pest = "2.7"
 pest_derive = "2.7"
 prettyplease = "0.2"
 proc-macro2 = "1.0"
 quote = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = "1"
 syn = "2.0"
 
-[workspace.dependencies.serde_bare]
-git = "https://github.com/rivet-dev/serde_bare"
-rev = "f63f155db7e0ab989255ee0d6991ff8eb9ebee25"
-# version = "0.5.0"

@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
-use serde::{Deserialize, Serialize};
-use vbare::OwnedVersionedData;
+use std::collections::BTreeMap;
+use vbare::{Bytes, DecodeError, DecodeErrorKind, Encode, EncodeError, Message, Sink, Versioned};
 
 // Bring generated schemas into this crate
 pub mod schemas {
@@ -16,8 +16,12 @@ pub enum AppVersioned {
     V3(schemas::v3::App),
 }
 
-impl vbare::OwnedVersionedData for AppVersioned {
+impl Versioned for AppVersioned {
     type Latest = schemas::v3::App;
+
+    const LATEST: u16 = 3;
+    const UPGRADES: &'static [vbare::Converter<Self>] = &[Self::v1_to_v2, Self::v2_to_v3];
+    const DOWNGRADES: &'static [vbare::Converter<Self>] = &[Self::v3_to_v2, Self::v2_to_v1];
 
     fn wrap_latest(latest: Self::Latest) -> Self {
         AppVersioned::V3(latest)
@@ -26,45 +30,37 @@ impl vbare::OwnedVersionedData for AppVersioned {
     fn unwrap_latest(self) -> Result<Self::Latest> {
         match self {
             AppVersioned::V3(app) => Ok(app),
-            _ => bail!("version not latest"),
+            AppVersioned::V1(_) | AppVersioned::V2(_) => bail!("version not latest"),
         }
     }
 
-    fn deserialize_version(payload: &[u8], version: u16) -> Result<Self> {
+    fn decode_version(version: u16, body: Bytes) -> Result<Self, DecodeError> {
         match version {
-            1 => Ok(AppVersioned::V1(serde_bare::from_slice(payload)?)),
-            2 => Ok(AppVersioned::V2(serde_bare::from_slice(payload)?)),
-            3 => Ok(AppVersioned::V3(serde_bare::from_slice(payload)?)),
-            _ => bail!("invalid version: {version}"),
+            1 => Ok(AppVersioned::V1(schemas::v1::App::decode(body)?)),
+            2 => Ok(AppVersioned::V2(schemas::v2::App::decode(body)?)),
+            3 => Ok(AppVersioned::V3(schemas::v3::App::decode(body)?)),
+            _ => Err(DecodeError::new(DecodeErrorKind::UnsupportedVersion, 0)),
         }
     }
 
-    fn serialize_version(self, _version: u16) -> Result<Vec<u8>> {
+    fn encode_version<S: Sink>(&self, _version: u16, out: &mut S) -> Result<(), EncodeError> {
         match self {
-            AppVersioned::V1(data) => Ok(serde_bare::to_vec(&data)?),
-            AppVersioned::V2(data) => Ok(serde_bare::to_vec(&data)?),
-            AppVersioned::V3(data) => Ok(serde_bare::to_vec(&data)?),
+            AppVersioned::V1(app) => app.encode(out),
+            AppVersioned::V2(app) => app.encode(out),
+            AppVersioned::V3(app) => app.encode(out),
         }
-    }
-
-    fn deserialize_converters() -> Vec<impl Fn(Self) -> Result<Self>> {
-        vec![Self::v1_to_v2, Self::v2_to_v3]
-    }
-
-    fn serialize_converters() -> Vec<impl Fn(Self) -> Result<Self>> {
-        // Not used by this example, but keep symmetric
-        vec![Self::v3_to_v2, Self::v2_to_v1]
+        Ok(())
     }
 }
 
 impl AppVersioned {
     fn v1_to_v2(self) -> Result<Self> {
-        use schemas::{v1, v2};
+        use schemas::v2;
         match self {
             AppVersioned::V1(app) => {
-                let mut todos: std::collections::HashMap<v2::TodoId, v2::Todo> = Default::default();
-                for t in app.todos.into_iter() {
-                    let id: v2::TodoId = t.id as u64;
+                let mut todos = BTreeMap::new();
+                for t in app.todos {
+                    let id: v2::TodoId = u64::from(t.id);
                     let status = if t.done {
                         v2::TodoStatus::Done
                     } else {
@@ -79,11 +75,10 @@ impl AppVersioned {
                     };
                     todos.insert(id, todo);
                 }
-                let app_v2 = v2::App {
+                Ok(AppVersioned::V2(v2::App {
                     todos,
-                    settings: Default::default(),
-                };
-                Ok(AppVersioned::V2(app_v2))
+                    settings: BTreeMap::new(),
+                }))
             }
             other => Ok(other),
         }
@@ -93,30 +88,24 @@ impl AppVersioned {
         use schemas::{v2, v3};
         match self {
             AppVersioned::V2(app) => {
-                // Convert tags: Vec<String> -> HashMap<TagId, Tag>
-                fn convert_tags(
-                    tags: Vec<String>,
-                ) -> std::collections::HashMap<v3::TagId, v3::Tag> {
-                    let mut map = std::collections::HashMap::new();
-                    let mut next_id: v3::TagId = 1; // simple incremental
-                    for name in tags.into_iter() {
-                        let tag = v3::Tag {
-                            id: next_id,
-                            name,
-                            color: None,
-                        };
-                        map.insert(next_id, tag);
-                        next_id += 1;
+                // Convert tags: list<str> -> map<TagId><Tag>
+                fn convert_tags(tags: Vec<vbare::Str>) -> BTreeMap<v3::TagId, v3::Tag> {
+                    let mut map = BTreeMap::new();
+                    for (id, name) in (1..).zip(tags) {
+                        map.insert(
+                            id,
+                            v3::Tag {
+                                id,
+                                name,
+                                color: None,
+                            },
+                        );
                     }
                     map
                 }
 
-                let mut todos: std::collections::HashMap<v3::TodoId, v3::Todo> = Default::default();
-                for (id, t) in app.todos.into_iter() {
-                    let detail = v3::TodoDetail {
-                        title: t.title,
-                        tags: convert_tags(t.tags),
-                    };
+                let mut todos = BTreeMap::new();
+                for (id, t) in app.todos {
                     let status = match t.status {
                         v2::TodoStatus::Open => v3::TodoStatus::Open,
                         v2::TodoStatus::InProgress => v3::TodoStatus::InProgress,
@@ -132,21 +121,23 @@ impl AppVersioned {
                             user_id: None,
                             team_id: None,
                         },
-                        detail,
+                        detail: v3::TodoDetail {
+                            title: t.title,
+                            tags: convert_tags(t.tags),
+                        },
                         history: Vec::new(),
                     };
                     todos.insert(id, todo);
                 }
 
-                let app_v3 = v3::App {
+                Ok(AppVersioned::V3(v3::App {
                     todos,
                     config: v3::AppConfig {
                         theme: v3::Theme::System,
-                        features: Default::default(),
+                        features: BTreeMap::new(),
                     },
-                    boards: Default::default(),
-                };
-                Ok(AppVersioned::V3(app_v3))
+                    boards: BTreeMap::new(),
+                }))
             }
             other => Ok(other),
         }
@@ -156,38 +147,29 @@ impl AppVersioned {
         use schemas::{v2, v3};
         match self {
             AppVersioned::V3(app) => {
-                fn revert_tags(tags: std::collections::HashMap<v3::TagId, v3::Tag>) -> Vec<String> {
-                    let mut v = Vec::with_capacity(tags.len());
-                    for (_, tag) in tags.into_iter() {
-                        v.push(tag.name);
-                    }
-                    v
-                }
-                let mut todos: std::collections::HashMap<v2::TodoId, v2::Todo> = Default::default();
-                for (id, t) in app.todos.into_iter() {
-                    let title = t.detail.title;
-                    let tags = revert_tags(t.detail.tags);
+                let mut todos = BTreeMap::new();
+                for (id, t) in app.todos {
                     let status = match t.status {
                         v3::TodoStatus::Open => v2::TodoStatus::Open,
                         v3::TodoStatus::InProgress => v2::TodoStatus::InProgress,
                         v3::TodoStatus::Done => v2::TodoStatus::Done,
                     };
+                    let tags = t.detail.tags.into_values().map(|tag| tag.name).collect();
                     todos.insert(
                         id,
                         v2::Todo {
                             id,
-                            title,
+                            title: t.detail.title,
                             status,
                             created_at: t.created_at,
                             tags,
                         },
                     );
                 }
-                let app_v2 = v2::App {
+                Ok(AppVersioned::V2(v2::App {
                     todos,
-                    settings: Default::default(),
-                };
-                Ok(AppVersioned::V2(app_v2))
+                    settings: BTreeMap::new(),
+                }))
             }
             other => Ok(other),
         }
@@ -197,13 +179,12 @@ impl AppVersioned {
         use schemas::{v1, v2};
         match self {
             AppVersioned::V2(app) => {
-                let mut todos: Vec<v1::Todo> = Vec::new();
-                for (_id, t) in app.todos.into_iter() {
-                    let done = matches!(t.status, v2::TodoStatus::Done);
+                let mut todos = Vec::new();
+                for t in app.todos.into_values() {
                     todos.push(v1::Todo {
-                        id: t.id as u32,
+                        id: u32::try_from(t.id)?,
                         title: t.title,
-                        done,
+                        done: matches!(t.status, v2::TodoStatus::Done),
                     });
                 }
                 Ok(AppVersioned::V1(v1::App { todos }))
@@ -214,6 +195,6 @@ impl AppVersioned {
 }
 
 // Convenience function for consumers/tests
-pub fn migrate_to_latest(payload: &[u8], version: u16) -> Result<schemas::v3::App> {
-    AppVersioned::deserialize(payload, version)
+pub fn migrate_to_latest(payload: Bytes, version: u16) -> Result<schemas::v3::App, DecodeError> {
+    AppVersioned::decode_body(payload, version)
 }

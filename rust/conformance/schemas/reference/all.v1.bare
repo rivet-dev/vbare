@@ -1,0 +1,152 @@
+#import "shared/common.v1.bare"
+
+# Every primitive type.
+type Primitives struct {
+  vUint: uint
+  vInt: int
+  vU8: u8
+  vU16: u16
+  vU32: u32
+  vU64: u64
+  vI8: i8
+  vI16: i16
+  vI32: i32
+  vI64: i64
+  vF32: f32
+  vF64: f64
+  vBool: bool
+  vStr: str
+  vData: data
+}
+
+# Fixed-length data and lists on both sides of the 32-element array limit.
+type Data1 data[1]
+type Data32 data[32]
+type Data33 data[33]
+type FixedLengths struct {
+  d1: Data1
+  d32: data[32]
+  d33: Data33
+  l1: list<u16>[1]
+  l32: list<u8>[32]
+  l33: list<u16>[33]
+  strings: list<str>[2]
+  nested: list<list<u8>[2]>[3]
+}
+
+type Color enum {
+  RED
+  GREEN
+  BLUE
+}
+
+type Sparse enum {
+  FIRST
+  SECOND = 5
+  THIRD
+  BIG = 300
+  HUGE = 9007199254740991
+}
+
+type Value union {
+  SharedPoint
+  | str
+  | uint
+  | SharedEmpty
+  | Color
+  | bool
+  | f64
+}
+
+type Optionals struct {
+  oUint: optional<uint>
+  oInt: optional<int>
+  oU8: optional<u8>
+  oF64: optional<f64>
+  oBool: optional<bool>
+  oStr: optional<str>
+  oData: optional<data>
+  oFixed: optional<data[4]>
+  oList: optional<list<str>>
+  oMap: optional<map<str><u32>>
+  oEnum: optional<Color>
+  oStruct: optional<SharedPoint>
+  oOptional: optional<optional<u8>>
+  oUnion: optional<Value>
+}
+
+type Maps struct {
+  byStr: map<str><str>
+  byU8: map<u8><u8>
+  byU16: map<u16><bool>
+  byU32: map<u32><data>
+  byU64: map<u64><SharedPoint>
+  byI8: map<i8><i8>
+  byI16: map<i16><str>
+  byI32: map<i32><list<u8>>
+  byI64: map<i64><optional<str>>
+  byBool: map<bool><u8>
+  byAlias: map<SharedId><SharedName>
+  nested: map<str><map<str><u8>>
+}
+
+type Lists struct {
+  numbers: list<uint>
+  strings: list<str>
+  nested: list<list<str>>
+  points: list<SharedPoint>
+  values: list<Value>
+  maybe: list<optional<u16>>
+  blobs: list<data>
+}
+
+type Inner struct {
+  label: str
+  point: SharedPoint
+}
+
+type Nested struct {
+  id: SharedId
+  kind: SharedKind
+  inner: Inner
+  anonymous: struct {
+    flag: bool
+    items: list<struct {
+      name: str
+      weight: f32
+    }>
+  }
+  choice: union {
+    Inner
+    | u8
+    | str
+  }
+  status: enum {
+    ON
+    OFF
+  }
+}
+
+type Message union {
+  Primitives
+  | FixedLengths
+  | Optionals
+  | Maps
+  | Lists
+  | Nested
+  | SharedEmpty
+  | SharedPoint
+}
+
+type Alias Nested
+type AliasList list<Inner>
+type AliasMap map<str><Inner>
+type AliasOptional optional<Value>
+
+# Small types for the documented divergence tests.
+type Flag bool
+type MaybeU8 optional<u8>
+type Counter uint
+type Dict map<str><u8>
+type Name str
+type Words33 list<u16>[33]

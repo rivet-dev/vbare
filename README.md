@@ -92,6 +92,13 @@ The layout looks like this:
 +-------------------+-------------------+
 ```
 
+## Rust Code Generation
+
+The Rust generator emits a zero-copy codec: decoding verifies a message once and then reads
+fields in place, and owned values share `str` and `data` bytes with the input buffer. The encoding
+follows the BARE specification exactly, including explicit enum values, explicit union tags, and
+fixed-length `data[N]` and `list<T>[N]` of any length. See [rust/](./rust/).
+
 ## Philosophy
 
 The core of why VBARE was designed this way is:

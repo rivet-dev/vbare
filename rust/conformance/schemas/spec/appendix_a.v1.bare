@@ -1,0 +1,17 @@
+# draft-devault-bare-11 Appendix A. Each example type, named so it can be tested on its own.
+type AUint uint
+type AInt int
+type AU32 u32
+type AI16 i16
+type AF64 f64
+type ABool bool
+type AStr str
+type AData data
+type AData16 data[16]
+type AEnum enum {FOO BAR = 255 BUZZ}
+type AOptional optional<u32>
+type AList list<str>
+type AFixedList list<uint>[10]
+type AMap map<u32><str>
+type AUnion union {int | uint = 255 | str}
+type AStruct struct {foo: uint bar: int buzz: str}

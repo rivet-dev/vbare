@@ -1,0 +1,54 @@
+# Every construct `vbare_gen::Config::serde` accepts. `tests/serde.rs` checks that serde_bare
+# writes and reads the same bytes as the codec for these types.
+
+type Id data[16]
+type Wide data[40]
+type Empty void
+
+type Kind enum {
+  ALPHA
+  BETA
+  GAMMA
+}
+
+type Inner struct {
+  id: Id
+  label: str
+}
+
+type Event union {
+  Inner
+  | Empty
+  | str
+  | data
+  | Kind
+  | struct {
+    at: i64
+    note: optional<str>
+  }
+}
+
+type Everything struct {
+  vU8: u8
+  vU16: u16
+  vU32: u32
+  vU64: u64
+  vI8: i8
+  vI16: i16
+  vI32: i32
+  vI64: i64
+  vF32: f32
+  vF64: f64
+  vBool: bool
+  vStr: str
+  vData: data
+  id: Id
+  wide: Wide
+  maybe: optional<Inner>
+  kinds: list<Kind>
+  blobs: list<data>
+  pair: list<u16>[2]
+  byName: map<str><data>
+  byId: map<u32><Inner>
+  events: list<Event>
+}

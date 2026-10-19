@@ -1,0 +1,17 @@
+# draft-devault-bare-11 Appendix C.3, verbatim.
+type NodeId uint
+
+type Node struct {
+  what: str
+}
+
+type Connection struct {
+  from: NodeId
+  to: NodeId
+  why: str
+}
+
+type Graph struct {
+  nodes: map<NodeId><Node>
+  edges: list<Connection>
+}

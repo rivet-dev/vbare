@@ -1,0 +1,27 @@
+# Constructs bare_proc 0.2.0 cannot express: explicit union tags, enum value 0 written
+# explicitly, and map keys of uint, int or enum type.
+
+type Level enum {
+  LOW = 0
+  MID
+  HIGH = 10
+}
+
+type Tagged union {
+  str = 3
+  | u8
+  | Level = 100
+  | void
+}
+
+type Keys struct {
+  byUint: map<uint><str>
+  byInt: map<int><str>
+  byEnum: map<Level><u8>
+}
+
+type Spec union {
+  int
+  | uint = 255
+  | str
+}

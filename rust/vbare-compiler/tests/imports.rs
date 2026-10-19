@@ -22,8 +22,8 @@ fn generates_shared_types_once_and_imports_transitive_modules() {
     assert!(code.contains("use super::shared_common_v1::*;"));
     assert!(code.contains("use super::shared_middle_v2::*;"));
     assert!(!code.contains("pub struct SharedKey"));
-    assert!(code.contains("pub key: Option<SharedKey>"));
-    assert!(code.contains("pub keys: Vec<SharedKey>"));
+    assert!(code.contains("pub key: ::std::option::Option<SharedKey>"));
+    assert!(code.contains("pub keys: ::std::vec::Vec<SharedKey>"));
     assert!(
         !code.contains("Eq, Hash"),
         "floating imported types must prevent Eq/Hash derives"

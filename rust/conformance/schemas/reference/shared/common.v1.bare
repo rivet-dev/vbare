@@ -1,0 +1,13 @@
+# Types shared through #import.
+type SharedId u64
+type SharedName str
+type SharedKind enum {
+  ALPHA
+  BETA
+  GAMMA = 7
+}
+type SharedPoint struct {
+  x: i32
+  y: i32
+}
+type SharedEmpty void

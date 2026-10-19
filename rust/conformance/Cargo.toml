@@ -8,7 +8,7 @@ description = "Conformance tests comparing the vbare codec with bare_proc, serde
 build = "build/main.rs"
 
 [dependencies]
-# The published BARE reference implementation. Not the workspace serde_bare fork.
+# The published BARE reference implementation.
 bare_proc = "=0.2.0"
 serde_bare = "=0.5.0"
 serde = { version = "1", features = ["derive"] }
